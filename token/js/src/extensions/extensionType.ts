@@ -117,14 +117,28 @@ export function getAccountLen(extensionTypes: ExtensionType[]): number {
 
 export function getExtensionData(extension: ExtensionType, tlvData: Buffer): Buffer | null {
     let extensionTypeIndex = 0;
-    while (extensionTypeIndex < tlvData.length) {
+    console.log("HANA BEGIN (entry type: u16le type tag in buffer, entry len: length of data, type idx: offset of data after type tag and length)");
+    console.log(`     cpi guard: ${ExtensionType.CpiGuard}/${CPI_GUARD_SIZE}, memo transfer: ${ExtensionType.MemoTransfer}/${MEMO_TRANSFER_SIZE}`);
+    console.log("     buffer:", tlvData);
+    console.log("");
+
+    while (extensionTypeIndex + TYPE_SIZE + LENGTH_SIZE <= tlvData.length) {
+        console.log(`HANA idx: ${extensionTypeIndex}, tlv len: ${tlvData.length}`);
         const entryType = tlvData.readUInt16LE(extensionTypeIndex);
+
+        console.log(`     entry type: ${entryType} ==? ${extension}`);
         const entryLength = tlvData.readUInt16LE(extensionTypeIndex + TYPE_SIZE);
+
+        console.log(`     entry len: ${entryLength}`);
         const typeIndex = extensionTypeIndex + TYPE_SIZE + LENGTH_SIZE;
+
+        console.log(`     type idx: ${typeIndex}`);
         if (entryType == extension) {
             return tlvData.slice(typeIndex, typeIndex + entryLength);
         }
         extensionTypeIndex = typeIndex + entryLength;
+
+        console.log(`  -> newly computed: ${extensionTypeIndex}\n`);
     }
     return null;
 }
