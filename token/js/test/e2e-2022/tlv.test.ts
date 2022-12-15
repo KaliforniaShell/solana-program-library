@@ -25,6 +25,8 @@ import { TEST_PROGRAM_ID, newAccountWithLamports, getConnection } from '../commo
 // * random permutations of extensions
 // * with and without interspersal of uninitialized extensions
 // * enablement of enableable extensions, including in possible uninitialized gaps
+// * extra bytes at the end
+// * the shit that it uses to make mints/accounts not look like multisigs
 // i think memo and cpi are the only enableable (more correctly, jit initializable) ones
 // i want to proptest the rust parser too because i dont really trust it so this will be good practice
 //
@@ -69,7 +71,7 @@ describe('', () => {
             const mintAuthority = Keypair.generate();
             const accountKeypair = Keypair.generate();
             const account = accountKeypair.publicKey;
-            const accountLen = getAccountLen(extensions);
+            const accountLen = getAccountLen(extensions) + 6;
             const lamports = await connection.getMinimumBalanceForRentExemption(accountLen);
 
             const mint = await createMint(
@@ -110,8 +112,13 @@ describe('', () => {
 
     it('parse account, no extensions', async () => {
         const account = await initTestAccount([]);
+
+        const accountInfo = await getAccount(connection, account, undefined, TEST_PROGRAM_ID);
+        let cpiGuard = getExtensionData(ExtensionType.CpiGuard, accountInfo.tlvData);
+        expect(cpiGuard).to.be.null;
     });
 
+/*
     it('HANA test whatever', async () => {
         // TODO gen perms here
         const extensions = [ExtensionType.CpiGuard];
@@ -123,6 +130,7 @@ describe('', () => {
         let cpiGuard = getExtensionData(ExtensionType.CpiGuard, accountInfo.tlvData);
         expect(cpiGuard).to.not.be.null;
     });
+*/
 
     // XXX OK NEXT when im back...
     // * write a simple function to generate permutations of extension type, make it fancy later
