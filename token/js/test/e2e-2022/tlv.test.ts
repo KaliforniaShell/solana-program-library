@@ -12,6 +12,7 @@ import {
     createInitializeAccountInstruction,
     createEnableCpiGuardInstruction,
     createEnableRequiredMemoTransfersInstruction,
+    createInitializeImmutableOwnerInstruction,
     createInitializeTransferFeeConfigInstruction,
     getAccount,
     getCpiGuard,
@@ -80,9 +81,6 @@ function chooseExtensions(extensions: ExtensionType[]) {
     // TODO remove this once confidential support lands
     extensions = extensions.filter(e => e != ExtensionType.ConfidentialTransferMint && e != ExtensionType.ConfidentialTransferAccount);
 
-    // TODO ill add immutable instruction myself lol
-    extensions = extensions.filter(e => e != ExtensionType.ImmutableOwner);
-
     // TODO lmao i need to write a function to init mints with extensions...
     extensions = extensions.filter(e => e != ExtensionType.TransferFeeAmount);
 
@@ -124,6 +122,11 @@ describe('', () => {
             signer: owner,
         };
 
+        extension_map[ExtensionType.ImmutableOwner] = {
+            instruction: (account: PublicKey) =>
+                createInitializeImmutableOwnerInstruction(account, TEST_PROGRAM_ID),
+        };
+
         // account extension is automatically enforced by mint extension
         extension_map[ExtensionType.TransferFeeAmount] = {};
         extension_map[ExtensionType.TransferFeeConfig] = {
@@ -150,6 +153,9 @@ describe('', () => {
                 TEST_PROGRAM_ID
             );
 
+            // XXX omg im gonna kms
+            // initialize needs to go before memo/cpi but after immutable LOL
+            // maybe this is all stupid
             let signers = [payer, accountKeypair];
             let transaction = new Transaction().add(
                 SystemProgram.createAccount({
@@ -158,14 +164,14 @@ describe('', () => {
                     space: accountLen,
                     lamports,
                     programId: TEST_PROGRAM_ID,
-                }),
-                createInitializeAccountInstruction(account, mint, owner.publicKey, TEST_PROGRAM_ID),
+                })
             );
             for (let extension of extensions) {
                 let ext = extension_map[extension]
                 transaction.add(ext.instruction(account));
                 if (ext.signer && !signers.includes(ext.signer)) signers.push(ext.signer);
             }
+            transaction.add(createInitializeAccountInstruction(account, mint, owner.publicKey, TEST_PROGRAM_ID));
 
             await sendAndConfirmTransaction(connection, transaction, signers, {skipPreflight: true});
 
@@ -200,19 +206,48 @@ describe('', () => {
         }
 
         for (let promise of promises) {
-            let [bytes, accountInfo] = await promise;
+            let [extraBytes, accountInfo] = await promise;
+
             for (let extension of ACCOUNT_EXTENSIONS) {
                 expect(
                     getExtensionData(extension, accountInfo.tlvData),
-                    `account parse test failed. test case: no extensions, ${bytes} extra bytes` 
+                    `account parse test failed: found ${ExtensionType[extension]}, but should not have. test case: no extensions, ${extraBytes} extra bytes` 
                 ).to.be.null;
             }
         }
     });
 
     it('HANA test whatever new', async () => {
-        for(let i = 0; i < 20; i++) {
-            console.log(chooseExtensions(ACCOUNT_EXTENSIONS));
+        let promises = [];
+
+        for(let i = 0; i < 32; i++) {
+            let extensions = chooseExtensions(ACCOUNT_EXTENSIONS);
+            let extraBytes = Math.random() >= 0.5 ? Math.ceil(Math.random() * 8) : 0;
+
+            console.log(`HANA exts: ${extensions.map(e => ExtensionType[e])}, extra: ${extraBytes}`);
+
+            promises.push(
+                initTestAccount(extensions, extraBytes)
+                .then((account: PublicKey) => getAccount(connection, account, undefined, TEST_PROGRAM_ID))
+                .then((accountInfo: Account) => [extensions, extraBytes, accountInfo])
+            );
+        }
+
+        for (let promise of promises) {
+            let [extensions, extraBytes, accountInfo] = await promise;
+            let extensionNames = extensions.map((e: any) => ExtensionType[e]);
+
+            for (let extension of extensions) {
+                expect(
+                    getExtensionData(extension, accountInfo.tlvData),
+                    `account parse test failed: failed to find ${ExtensionType[extension]}. test case: ${extensionNames} extensions, ${extraBytes} extra bytes` 
+                ).to.not.be.null;
+            }
+
+            // XXX uh. ok next thing to do is check insersect of ACCOUNT_EXTENSION and extensions is null
+            // but im starting to feel like this isnt really that valuable
+            // should i even be doing this? the bug was just in reading the u16s
+            // idk think about it on monday
         }
     });
 
