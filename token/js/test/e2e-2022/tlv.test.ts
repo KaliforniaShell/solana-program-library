@@ -30,15 +30,15 @@ describe('tlv test', () => {
     let payer: Signer;
     let owner: Keypair;
 
-    let initTestMint: Function;
-    let initTestAccount: Function;
-
     before(async () => {
         connection = await getConnection();
         payer = await newAccountWithLamports(connection, 1000000000);
         owner = Keypair.generate();
+    });
 
-        initTestAccount = async (extraBytes: number = 0) => {
+    // test that the parser gracefully handles accounts with arbitrary extra bytes
+    it('parse account with extra bytes', async () => {
+        const initTestAccount = async (extraBytes: number) => {
             const mintKeypair = Keypair.generate();
             const accountKeypair = Keypair.generate();
             const account = accountKeypair.publicKey;
@@ -64,39 +64,35 @@ describe('tlv test', () => {
                     lamports,
                     programId: TEST_PROGRAM_ID,
                 }),
-                createInitializeAccountInstruction(account, mint, owner.publicKey, TEST_PROGRAM_ID),
+                createInitializeAccountInstruction(account, mint, owner.publicKey, TEST_PROGRAM_ID)
             );
 
             await sendAndConfirmTransaction(connection, transaction, [payer, accountKeypair], undefined);
 
             return account;
-        }
-    });
+        };
 
-    // test that the parser gracefully handles accounts with arbitrary extra bytes
-    it('parse account with extra bytes', async () => {
-        let promises = [];
-
-        for(let i = 0; i < 16; i++) {
+        const promises: Promise<[number, Account]>[] = [];
+        for (let i = 0; i < 16; i++) {
             // trying to alloc exactly one extra byte causes an unpack failure in the program when initializing
             if (i == 1) continue;
 
             promises.push(
                 initTestAccount(i)
-                .then((account: PublicKey) => getAccount(connection, account, undefined, TEST_PROGRAM_ID))
-                .then((accountInfo: Account) => [i, accountInfo])
+                    .then((account: PublicKey) => getAccount(connection, account, undefined, TEST_PROGRAM_ID))
+                    .then((accountInfo: Account) => [i, accountInfo])
             );
         }
 
-        for (let promise of promises) {
-            let [extraBytes, accountInfo] = await promise;
+        for (const promise of promises) {
+            const [extraBytes, accountInfo] = await promise;
 
-            for (let extension of ACCOUNT_EXTENSIONS) {
+            for (const extension of ACCOUNT_EXTENSIONS) {
                 // realistically this will never fail with a non-null value, it will just throw
                 expect(
                     getExtensionData(extension, accountInfo.tlvData),
                     `account parse test failed: found ${ExtensionType[extension]}, but should not have. \
-                    test case: no extensions, ${extraBytes} extra bytes` 
+                    test case: no extensions, ${extraBytes} extra bytes`
                 ).to.be.null;
             }
         }
