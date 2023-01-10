@@ -29,6 +29,7 @@ members = [
   "shared-memory/program",
   "stake-pool/cli",
   "stake-pool/program",
+  "stake-pool/birdbath",
   "stateless-asks/program",
   "token-lending/cli",
   "token-lending/program",
