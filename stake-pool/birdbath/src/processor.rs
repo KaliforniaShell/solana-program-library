@@ -129,6 +129,39 @@ fn check_token_program(address: &Pubkey) -> Result<(), ProgramError> {
     }
 }
 
+fn calculate_deposit_amount(
+    token_supply: u64,
+    validator_lamports: u64,
+    deposit_lamports: u64,
+) -> Option<u64> {
+    if validator_lamports == 0 || token_supply == 0 {
+        Some(deposit_lamports)
+    } else {
+        u64::try_from(
+            (deposit_lamports as u128)
+                .checked_mul(token_supply as u128)?
+                .checked_div(validator_lamports as u128)?,
+        )
+        .ok()
+    }
+}
+
+fn calculate_withdraw_amount(
+    token_supply: u64,
+    validator_lamports: u64,
+    burn_tokens: u64,
+) -> Option<u64> {
+    let numerator = (burn_tokens as u128).checked_mul(validator_lamports as u128)?;
+    let denominator = token_supply as u128;
+    if numerator < denominator || denominator == 0 {
+        Some(0)
+    } else {
+        u64::try_from(numerator.checked_div(denominator)?).ok()
+    }
+}
+
+// XXX hana zone over
+
 /// Check validity of vote address for a particular stake account
 fn check_validator_stake_address(
     program_id: &Pubkey,
@@ -518,6 +551,163 @@ impl Processor {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn hana_stake_merge<'a>(
+        validator_vote_key: &Pubkey,
+        source_account: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        bump_seed: u8,
+        destination_account: AccountInfo<'a>,
+        clock: AccountInfo<'a>,
+        stake_history: AccountInfo<'a>,
+        stake_program_info: AccountInfo<'a>,
+    ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
+        invoke_signed(
+            &stake::instruction::merge(destination_account.key, source_account.key, authority.key)
+                [0],
+            &[
+                destination_account,
+                source_account,
+                clock,
+                stake_history,
+                authority,
+                stake_program_info,
+            ],
+            signers,
+        )
+    }
+
+    fn hana_stake_split<'a>(
+        validator_vote_key: &Pubkey,
+        stake_account: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        bump_seed: u8,
+        amount: u64,
+        split_stake: AccountInfo<'a>,
+    ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
+        let split_instruction =
+            stake::instruction::split(stake_account.key, authority.key, amount, split_stake.key);
+
+        invoke_signed(
+            split_instruction.last().unwrap(),
+            &[stake_account, split_stake, authority],
+            signers,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn hana_stake_authorize_signed<'a>(
+        validator_vote_key: &Pubkey,
+        stake_account: AccountInfo<'a>,
+        stake_authority: AccountInfo<'a>,
+        bump_seed: u8,
+        new_stake_authority: &Pubkey,
+        clock: AccountInfo<'a>,
+        stake_program_info: AccountInfo<'a>,
+    ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
+        let authorize_instruction = stake::instruction::authorize(
+            stake_account.key,
+            stake_authority.key,
+            new_stake_authority,
+            stake::state::StakeAuthorize::Staker,
+            None,
+        );
+
+        invoke_signed(
+            &authorize_instruction,
+            &[
+                stake_account.clone(),
+                clock.clone(),
+                stake_authority.clone(),
+                stake_program_info.clone(),
+            ],
+            signers,
+        )?;
+
+        let authorize_instruction = stake::instruction::authorize(
+            stake_account.key,
+            stake_authority.key,
+            new_stake_authority,
+            stake::state::StakeAuthorize::Withdrawer,
+            None,
+        );
+        invoke_signed(
+            &authorize_instruction,
+            &[stake_account, clock, stake_authority, stake_program_info],
+            signers,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn hana_token_mint_to<'a>(
+        validator_vote_key: &Pubkey,
+        token_program: AccountInfo<'a>,
+        mint: AccountInfo<'a>,
+        destination: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        bump_seed: u8,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
+        let ix = spl_token::instruction::mint_to(
+            token_program.key,
+            mint.key,
+            destination.key,
+            authority.key,
+            &[],
+            amount,
+        )?;
+
+        invoke_signed(&ix, &[mint, destination, authority, token_program], signers)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn hana_token_burn<'a>(
+        token_program: AccountInfo<'a>,
+        burn_account: AccountInfo<'a>,
+        mint: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        let ix = spl_token::instruction::burn(
+            token_program.key,
+            burn_account.key,
+            mint.key,
+            authority.key,
+            &[],
+            amount,
+        )?;
+
+        invoke(&ix, &[burn_account, mint, authority, token_program])
+    }
+
     /// Issue stake::instruction::authorize instructions to update both authorities
     fn stake_authorize<'a>(
         stake_account: AccountInfo<'a>,
@@ -780,8 +970,8 @@ impl Processor {
         let stake_history_info = next_account_info(account_info_iter)?;
         let stake_config_info = next_account_info(account_info_iter)?;
         let system_program_info = next_account_info(account_info_iter)?;
-        let stake_program_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
+        let stake_program_info = next_account_info(account_info_iter)?;
 
         check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
         let bump_seed = check_pool_authority_address(
@@ -791,14 +981,16 @@ impl Processor {
         )?;
         check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
-        check_stake_program(stake_program_info.key)?;
         check_token_program(token_program_info.key)?;
+        check_stake_program(stake_program_info.key)?;
 
         // change to Rent::get() if i get rid of the invokes that require the AccountInfo
         let rent = &Rent::from_account_info(rent_info)?;
 
+        // we can create the mint and stake in separate instructions
+        // i just like it this way because no account validation required lol
+
         // create the pool mint
-        // (can create in instruction if desired)
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
 
@@ -833,7 +1025,6 @@ impl Processor {
         )?;
 
         // create the pool stake account
-        // (can create in instruction if desired)
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
         let required_lamports = rent.minimum_balance(stake_space).saturating_add(1);
         let authorized = stake::state::Authorized::auto(pool_authority_info.key);
@@ -888,13 +1079,126 @@ impl Processor {
             signers,
         )?;
 
-        // could burn or award the token here if we wanted
+        // could mint the token here if we wanted, either to user or incinerator
 
         Ok(())
     }
 
+    // XXX ok cool next up ummm
+    // the other two functions are extremely simplified version of their namesakes
+    // for deposit we literally only need to call stake_merge (or a hana version), not authorize
+    // because the user can et both authorities to ours rather than going through deposit authority
+    //
+    // and then the token calculation is just...
+    // stake added * total tokens / total stake ?
+    //
+    // "total deposit" is simply, post lamps minus pre lamps
+    // "stake deposit" is post stake minus pre stake
+    // "sol deposit" is total deposit minus stake deposit
+    // so it calcs "new pool" and "new pool from stake" from quantities 1 and 2
+    // then "new pool from sol" as "new pool" minus "new pool from stake"
+    // it calcs stake and sol deposit fees... and the total fee is the sum of them
+    // "pool tokens user" then is "new pool" minus "total fee"
+    // and finally it mints this. so...
+    // im not sure why "sol deposit" should ever be nonzero? unless is this the rent?
+    // assuming its rent (actually this makes sense, its not active stake!), we can just kick it back to the user
+    // this means all the calculation goes basically goes away
+    // can user withdraw their own rent? the account wouldnt get zeroed until the end of the txn
+    // if so lol just. check lamps minus stake is zero and mint tokens commesurate to the stake
+    // if its not possible tho just take a wallet do the merge and send back the extra lamps
+
     #[inline(never)] // needed to avoid stack size violation
     fn process_hana_deposit_stake(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        // FIXME we only need this as a pubkey, pass it as an arg
+        // XXX actually i can get the pubkey via stakestate -> delegation lol
+        // this is starting to make me sideeye tho and maybe i should have a program-owned struct for it
+        // i dont "need" it to be safe but its probably better to be more straightforward
+        let validator_vote_info = next_account_info(account_info_iter)?;
+        let pool_stake_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
+        let pool_mint_info = next_account_info(account_info_iter)?;
+        let user_stake_info = next_account_info(account_info_iter)?;
+        let user_token_account_info = next_account_info(account_info_iter)?;
+        let clock_info = next_account_info(account_info_iter)?;
+        let stake_history_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let stake_program_info = next_account_info(account_info_iter)?;
+
+        check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        let bump_seed = check_pool_authority_address(
+            program_id,
+            validator_vote_info.key,
+            pool_authority_info.key,
+        )?;
+        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_token_program(token_program_info.key)?;
+        check_stake_program(stake_program_info.key)?;
+
+        let (_, pre_validator_stake) = get_stake_state(pool_stake_info)?;
+        let pre_all_validator_lamports = pool_stake_info.lamports();
+        msg!("Stake pre merge {}", pre_validator_stake.delegation.stake);
+
+        // we have no deposit authority, so we dont need to call stake_authorize
+        // user should set both authorities to pool_authority_info
+        // the merge succeeding implicitly validates all properties of the user stake account
+
+        Self::hana_stake_merge(
+            validator_vote_info.key,
+            user_stake_info.clone(),
+            pool_authority_info.clone(),
+            bump_seed,
+            pool_stake_info.clone(),
+            clock_info.clone(),
+            stake_history_info.clone(),
+            stake_program_info.clone(),
+        )?;
+
+        let (_, post_validator_stake) = get_stake_state(pool_stake_info)?;
+        let post_all_validator_lamports = pool_stake_info.lamports();
+        msg!("Stake post merge {}", post_validator_stake.delegation.stake);
+
+        let total_deposit_lamports = post_all_validator_lamports
+            .checked_sub(pre_all_validator_lamports)
+            .ok_or(StakePoolError::CalculationFailure)?;
+
+        let total_stake_deposit = post_validator_stake
+            .delegation
+            .stake
+            .checked_sub(pre_validator_stake.delegation.stake)
+            .ok_or(StakePoolError::CalculationFailure)?;
+
+        if total_deposit_lamports != total_stake_deposit {
+            panic!("error here? im 70% sure the user can pull rent so that we dont need to give lamports back at all");
+        }
+
+        let token_supply = {
+            let pool_mint_data = pool_mint_info.try_borrow_data()?;
+            let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
+            pool_mint.base.supply
+        };
+
+        let new_pool_tokens = calculate_deposit_amount(
+            token_supply,
+            pre_all_validator_lamports,
+            total_deposit_lamports,
+        )
+        .ok_or(StakePoolError::CalculationFailure)?;
+
+        if new_pool_tokens == 0 {
+            return Err(StakePoolError::DepositTooSmall.into());
+        }
+
+        Self::hana_token_mint_to(
+            validator_vote_info.key,
+            token_program_info.clone(),
+            pool_mint_info.clone(),
+            user_token_account_info.clone(),
+            pool_authority_info.clone(),
+            bump_seed,
+            new_pool_tokens,
+        )?;
+
         Ok(())
     }
 
@@ -902,8 +1206,81 @@ impl Processor {
     fn process_hana_withdraw_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        pool_tokens: u64,
+        burn_tokens: u64,
     ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        // FIXME as noted in deposit
+        let validator_vote_info = next_account_info(account_info_iter)?;
+        let pool_stake_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
+        let pool_mint_info = next_account_info(account_info_iter)?;
+        let user_stake_info = next_account_info(account_info_iter)?;
+        let user_stake_authority_info = next_account_info(account_info_iter)?;
+        let user_transfer_authority_info = next_account_info(account_info_iter)?;
+        let user_token_account_info = next_account_info(account_info_iter)?;
+        let clock_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let stake_program_info = next_account_info(account_info_iter)?;
+
+        check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        let bump_seed = check_pool_authority_address(
+            program_id,
+            validator_vote_info.key,
+            pool_authority_info.key,
+        )?;
+        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_token_program(token_program_info.key)?;
+        check_stake_program(stake_program_info.key)?;
+
+        let (_, pre_validator_stake) = get_stake_state(pool_stake_info)?;
+        let pre_all_validator_lamports = pool_stake_info.lamports();
+        msg!("Stake pre split {}", pre_validator_stake.delegation.stake);
+
+        let token_supply = {
+            let pool_mint_data = pool_mint_info.try_borrow_data()?;
+            let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
+            pool_mint.base.supply
+        };
+
+        let withdraw_lamports =
+            calculate_withdraw_amount(token_supply, pre_all_validator_lamports, burn_tokens)
+                .ok_or(StakePoolError::CalculationFailure)?;
+
+        if withdraw_lamports == 0 {
+            return Err(StakePoolError::WithdrawalTooSmall.into());
+        }
+
+        // theres a *ton* of housekeeping in process_withdraw_stake that i havent read line by line fully carefully
+        // but its all basically "we have a reserve and n validators and m transient accounts, whence stake?"
+        // here in stupidland we have no need of any of that
+
+        Self::hana_token_burn(
+            token_program_info.clone(),
+            user_token_account_info.clone(),
+            pool_mint_info.clone(),
+            user_transfer_authority_info.clone(),
+            burn_tokens,
+        )?;
+
+        Self::hana_stake_split(
+            validator_vote_info.key,
+            pool_stake_info.clone(),
+            pool_authority_info.clone(),
+            bump_seed,
+            withdraw_lamports,
+            user_stake_info.clone(),
+        )?;
+
+        Self::hana_stake_authorize_signed(
+            validator_vote_info.key,
+            user_stake_info.clone(),
+            pool_authority_info.clone(),
+            bump_seed,
+            user_stake_authority_info.key,
+            clock_info.clone(),
+            stake_program_info.clone(),
+        )?;
+
         Ok(())
     }
 
@@ -4113,7 +4490,14 @@ impl Processor {
                 msg!("Instruction: HanaInitialize");
                 Self::process_hana_initialize(program_id, accounts)
             }
-            _ => unimplemented!(),
+            StakePoolInstruction::HanaDepositStake => {
+                msg!("Instruction: DepositStake");
+                Self::process_hana_deposit_stake(program_id, accounts)
+            }
+            StakePoolInstruction::HanaWithdrawStake(amount) => {
+                msg!("Instruction: WithdrawStake");
+                Self::process_hana_withdraw_stake(program_id, accounts, amount)
+            }
         }
     }
 }
