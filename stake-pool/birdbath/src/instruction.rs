@@ -16,12 +16,59 @@ use {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
 pub enum StakePoolInstruction {
-    /// doc
+    ///   Initializes a new [bikeshed name].
+    ///
+    ///   0. `[]` Validator vote account
+    ///   1. `[s, w]` Fee-payer
+    ///   2. `[w]` Pool stake account
+    ///   3. `[w]` Pool authority
+    ///   4. `[w]` Pool token mint
+    ///   5. `[]` Rent sysvar
+    ///   6. `[]` Clock sysvar
+    ///   7. `[]` Stake history sysvar
+    ///   8. `[]` Stake config sysvar
+    ///   9. `[]` System program
+    ///  10. `[]` Token program
+    ///  11. `[]` Stake program
     HanaInitialize,
-    /// doc
-    HanaDepositStake,
-    /// doc
-    HanaWithdrawStake(u64),
+
+    ///   Deposit some stake into the pool.  The output is a "pool" token representing ownership
+    ///   into the pool. Inputs are converted to the current ratio.
+    ///
+    ///   0. `[w]` Pool stake account
+    ///   1. `[]` Pool authority
+    ///   2. `[w]` Pool token mint
+    ///   3. `[w]` User stake account to join to the pool
+    ///   4. `[w]` User account to receive pool tokens
+    ///   5. `[]` Clock sysvar
+    ///   6. `[]` Stake history sysvar
+    ///   7. `[]` Token program
+    ///   8. `[]` Stake program
+    HanaDepositStake {
+        /// Validator vote account address
+        vote_account_address: Pubkey,
+    },
+
+    ///   Redeem tokens issued by this pool for stake at the current ratio.
+    ///
+    ///   0. `[w]` Pool stake account
+    ///   1. `[]` Pool authority
+    ///   2. `[w]` Pool token mint
+    ///   3. `[w]` User stake account to receive stake at
+    // XXX FIXME this could be an argument
+    ///   4. `[]` User authority on stake account
+    ///   5. `[w]` User account to take pool tokens from
+    // XXX FIXME assign delegation to pool authority and drop this?
+    ///   6. `[]` User authority on token account
+    ///   7. `[]` Clock sysvar
+    ///   8. `[]` Token program
+    ///   9. `[]` Stake program
+    HanaWithdrawStake {
+        /// Validator vote account address
+        vote_account_address: Pubkey,
+        /// Amount of tokens to redeem for stake
+        amount: u64,
+    },
 
     // XXX as noted in processor, this actually can go away
     // set up a sensible default in initialize. we only need update
@@ -150,7 +197,11 @@ pub fn deposit_stake(
         Instruction {
             program_id: *program_id,
             accounts,
-            data: StakePoolInstruction::HanaDepositStake.try_to_vec().unwrap(),
+            data: StakePoolInstruction::HanaDepositStake {
+                vote_account_address: Pubkey::default(),
+            }
+            .try_to_vec()
+            .unwrap(),
         },
     ]
 }
@@ -189,9 +240,12 @@ pub fn withdraw_stake(
     Instruction {
         program_id: *program_id,
         accounts,
-        data: StakePoolInstruction::HanaWithdrawStake(amount)
-            .try_to_vec()
-            .unwrap(),
+        data: StakePoolInstruction::HanaWithdrawStake {
+            vote_account_address: Pubkey::default(),
+            amount,
+        }
+        .try_to_vec()
+        .unwrap(),
     }
 }
 

@@ -22,6 +22,8 @@ const POOL_STAKE_PREFIX: &[u8] = b"stake";
 const POOL_AUTHORITY_PREFIX: &[u8] = b"authority";
 const POOL_MINT_PREFIX: &[u8] = b"mint";
 
+const MINT_DECIMALS: u8 = 9;
+
 fn find_address(program_id: &Pubkey, vote_account_address: &Pubkey, prefix: &[u8]) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[prefix, vote_account_address.as_ref()], program_id)
 }

@@ -1,7 +1,10 @@
 //! program state processor
 
 use {
-    crate::{error::StakePoolError, instruction::StakePoolInstruction, POOL_AUTHORITY_PREFIX},
+    crate::{
+        error::StakePoolError, instruction::StakePoolInstruction, MINT_DECIMALS,
+        POOL_AUTHORITY_PREFIX,
+    },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
         instruction::{create_metadata_accounts_v3, update_metadata_accounts_v2},
@@ -394,8 +397,8 @@ impl Processor {
     #[inline(never)] // needed due to stack size violation
     fn process_hana_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let payer_info = next_account_info(account_info_iter)?;
         let validator_vote_info = next_account_info(account_info_iter)?;
+        let payer_info = next_account_info(account_info_iter)?;
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
@@ -449,7 +452,7 @@ impl Processor {
                 pool_mint_info.key,
                 pool_authority_info.key,
                 None,
-                9,
+                MINT_DECIMALS,
             )?,
             &[
                 pool_mint_info.clone(),
@@ -542,13 +545,12 @@ impl Processor {
     // if its not possible tho just take a wallet do the merge and send back the extra lamps
 
     #[inline(never)] // needed to avoid stack size violation
-    fn process_hana_deposit_stake(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    fn process_hana_deposit_stake(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        vote_account_address: &Pubkey,
+    ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        // FIXME we only need this as a pubkey, pass it as an arg
-        // XXX actually i can get the pubkey via stakestate -> delegation lol
-        // this is starting to make me sideeye tho and maybe i should have a program-owned struct for it
-        // i dont "need" it to be safe but its probably better to be more straightforward
-        let validator_vote_info = next_account_info(account_info_iter)?;
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
@@ -559,13 +561,13 @@ impl Processor {
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
-        check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        check_pool_stake_address(program_id, vote_account_address, pool_stake_info.key)?;
         let bump_seed = check_pool_authority_address(
             program_id,
-            validator_vote_info.key,
+            vote_account_address,
             pool_authority_info.key,
         )?;
-        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_pool_mint_address(program_id, vote_account_address, pool_mint_info.key)?;
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
@@ -578,7 +580,7 @@ impl Processor {
         // the merge succeeding implicitly validates all properties of the user stake account
 
         Self::hana_stake_merge(
-            validator_vote_info.key,
+            vote_account_address,
             user_stake_info.clone(),
             pool_authority_info.clone(),
             bump_seed,
@@ -624,7 +626,7 @@ impl Processor {
         }
 
         Self::hana_token_mint_to(
-            validator_vote_info.key,
+            vote_account_address,
             token_program_info.clone(),
             pool_mint_info.clone(),
             user_token_account_info.clone(),
@@ -640,29 +642,28 @@ impl Processor {
     fn process_hana_withdraw_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
+        vote_account_address: &Pubkey,
         burn_tokens: u64,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        // FIXME as noted in deposit
-        let validator_vote_info = next_account_info(account_info_iter)?;
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let user_stake_info = next_account_info(account_info_iter)?;
         let user_stake_authority_info = next_account_info(account_info_iter)?;
-        let user_transfer_authority_info = next_account_info(account_info_iter)?;
         let user_token_account_info = next_account_info(account_info_iter)?;
+        let user_transfer_authority_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
-        check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        check_pool_stake_address(program_id, vote_account_address, pool_stake_info.key)?;
         let bump_seed = check_pool_authority_address(
             program_id,
-            validator_vote_info.key,
+            vote_account_address,
             pool_authority_info.key,
         )?;
-        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_pool_mint_address(program_id, vote_account_address, pool_mint_info.key)?;
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
@@ -697,7 +698,7 @@ impl Processor {
         )?;
 
         Self::hana_stake_split(
-            validator_vote_info.key,
+            vote_account_address,
             pool_stake_info.clone(),
             pool_authority_info.clone(),
             bump_seed,
@@ -706,7 +707,7 @@ impl Processor {
         )?;
 
         Self::hana_stake_authorize_signed(
-            validator_vote_info.key,
+            vote_account_address,
             user_stake_info.clone(),
             pool_authority_info.clone(),
             bump_seed,
@@ -910,13 +911,23 @@ impl Processor {
                 msg!("Instruction: HanaInitialize");
                 Self::process_hana_initialize(program_id, accounts)
             }
-            StakePoolInstruction::HanaDepositStake => {
+            StakePoolInstruction::HanaDepositStake {
+                vote_account_address,
+            } => {
                 msg!("Instruction: DepositStake");
-                Self::process_hana_deposit_stake(program_id, accounts)
+                Self::process_hana_deposit_stake(program_id, accounts, &vote_account_address)
             }
-            StakePoolInstruction::HanaWithdrawStake(amount) => {
+            StakePoolInstruction::HanaWithdrawStake {
+                vote_account_address,
+                amount,
+            } => {
                 msg!("Instruction: WithdrawStake");
-                Self::process_hana_withdraw_stake(program_id, accounts, amount)
+                Self::process_hana_withdraw_stake(
+                    program_id,
+                    accounts,
+                    &vote_account_address,
+                    amount,
+                )
             }
         }
     }
