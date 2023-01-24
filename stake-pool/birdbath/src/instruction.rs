@@ -109,35 +109,33 @@ pub enum StakePoolInstruction {
     },
 }
 
-/// FIXME unchanged from original
-pub fn initialize(
-    program_id: &Pubkey,
-    stake_pool: &Pubkey,
-    manager: &Pubkey,
-    staker: &Pubkey,
-    stake_pool_withdraw_authority: &Pubkey,
-    validator_list: &Pubkey,
-    reserve_stake: &Pubkey,
-    pool_mint: &Pubkey,
-    manager_pool_account: &Pubkey,
-    token_program_id: &Pubkey,
-    deposit_authority: Option<Pubkey>,
-) -> Instruction {
+/// Creates an 'initialize' instruction.
+pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Instruction {
     let data = StakePoolInstruction::HanaInitialize.try_to_vec().unwrap();
-    let mut accounts = vec![
-        AccountMeta::new(*stake_pool, false),
-        AccountMeta::new_readonly(*manager, true),
-        AccountMeta::new_readonly(*staker, false),
-        AccountMeta::new_readonly(*stake_pool_withdraw_authority, false),
-        AccountMeta::new(*validator_list, false),
-        AccountMeta::new_readonly(*reserve_stake, false),
-        AccountMeta::new(*pool_mint, false),
-        AccountMeta::new(*manager_pool_account, false),
-        AccountMeta::new_readonly(*token_program_id, false),
+    let accounts = vec![
+        AccountMeta::new_readonly(*vote_account, false),
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(
+            crate::find_pool_stake_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(
+            crate::find_pool_authority_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(
+            crate::find_pool_mint_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new_readonly(sysvar::rent::id(), false),
+        AccountMeta::new_readonly(sysvar::clock::id(), false),
+        AccountMeta::new_readonly(sysvar::stake_history::id(), false),
+        AccountMeta::new_readonly(stake::config::id(), false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
+        AccountMeta::new_readonly(stake::program::id(), false),
     ];
-    if let Some(deposit_authority) = deposit_authority {
-        accounts.push(AccountMeta::new_readonly(deposit_authority, true));
-    }
+
     Instruction {
         program_id: *program_id,
         accounts,

@@ -3,7 +3,7 @@
 use {
     crate::{
         error::StakePoolError, instruction::StakePoolInstruction, MINT_DECIMALS,
-        POOL_AUTHORITY_PREFIX,
+        POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
     },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
@@ -47,8 +47,9 @@ fn check_pool_stake_address(
     program_id: &Pubkey,
     vote_account_address: &Pubkey,
     address: &Pubkey,
-) -> Result<(), ProgramError> {
-    let (pool_stake_address, _) = crate::find_pool_stake_address(program_id, vote_account_address);
+) -> Result<u8, ProgramError> {
+    let (pool_stake_address, bump_seed) =
+        crate::find_pool_stake_address(program_id, vote_account_address);
     if *address != pool_stake_address {
         msg!(
             "Incorrect pool stake address for vote {}, expected {}, received {}",
@@ -58,7 +59,7 @@ fn check_pool_stake_address(
         );
         panic!("return error here");
     } else {
-        Ok(())
+        Ok(bump_seed)
     }
 }
 
@@ -86,8 +87,9 @@ fn check_pool_mint_address(
     program_id: &Pubkey,
     vote_account_address: &Pubkey,
     address: &Pubkey,
-) -> Result<(), ProgramError> {
-    let (pool_mint_address, _) = crate::find_pool_mint_address(program_id, vote_account_address);
+) -> Result<u8, ProgramError> {
+    let (pool_mint_address, bump_seed) =
+        crate::find_pool_mint_address(program_id, vote_account_address);
     if *address != pool_mint_address {
         msg!(
             "Incorrect pool mint address for vote {}, expected {}, received {}",
@@ -97,7 +99,7 @@ fn check_pool_mint_address(
         );
         panic!("return error here");
     } else {
-        Ok(())
+        Ok(bump_seed)
     }
 }
 
@@ -410,16 +412,39 @@ impl Processor {
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
-        check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
-        let bump_seed = check_pool_authority_address(
+        let stake_bump_seed =
+            check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        let authority_bump_seed = check_pool_authority_address(
             program_id,
             validator_vote_info.key,
             pool_authority_info.key,
         )?;
-        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        let mint_bump_seed =
+            check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
+
+        let stake_seeds = &[
+            POOL_STAKE_PREFIX,
+            validator_vote_info.key.as_ref(),
+            &[stake_bump_seed],
+        ];
+        let stake_signers = &[&stake_seeds[..]];
+
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_info.key.as_ref(),
+            &[authority_bump_seed],
+        ];
+        let authority_signers = &[&authority_seeds[..]];
+
+        let mint_seeds = &[
+            POOL_MINT_PREFIX,
+            validator_vote_info.key.as_ref(),
+            &[mint_bump_seed],
+        ];
+        let mint_signers = &[&mint_seeds[..]];
 
         // change to Rent::get() if i get rid of the invokes that require the AccountInfo
         let rent = &Rent::from_account_info(rent_info)?;
@@ -431,7 +456,7 @@ impl Processor {
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
 
-        invoke(
+        invoke_signed(
             &system_instruction::create_account(
                 payer_info.key,
                 pool_mint_info.key,
@@ -444,9 +469,10 @@ impl Processor {
                 pool_mint_info.clone(),
                 system_program_info.clone(),
             ],
+            mint_signers,
         )?;
 
-        invoke(
+        invoke_signed(
             &spl_token::instruction::initialize_mint(
                 token_program_info.key,
                 pool_mint_info.key,
@@ -459,6 +485,7 @@ impl Processor {
                 rent_info.clone(),
                 system_program_info.clone(),
             ],
+            authority_signers,
         )?;
 
         // create the pool stake account
@@ -466,7 +493,7 @@ impl Processor {
         let required_lamports = rent.minimum_balance(stake_space).saturating_add(1);
         let authorized = stake::state::Authorized::auto(pool_authority_info.key);
 
-        invoke(
+        invoke_signed(
             &system_instruction::create_account(
                 payer_info.key,
                 pool_stake_info.key,
@@ -479,9 +506,10 @@ impl Processor {
                 pool_stake_info.clone(),
                 stake_program_info.clone(),
             ],
+            stake_signers,
         )?;
 
-        invoke(
+        invoke_signed(
             &stake::instruction::initialize_checked(pool_stake_info.key, &authorized),
             &[
                 pool_stake_info.clone(),
@@ -489,16 +517,10 @@ impl Processor {
                 pool_authority_info.clone(),
                 pool_authority_info.clone(),
             ],
+            authority_signers,
         )?;
 
         // delegate the stake so it activates
-        let authority_seeds = &[
-            POOL_AUTHORITY_PREFIX,
-            validator_vote_info.key.as_ref(),
-            &[bump_seed],
-        ];
-        let signers = &[&authority_seeds[..]];
-
         invoke_signed(
             &stake::instruction::delegate_stake(
                 pool_stake_info.key,
@@ -513,7 +535,7 @@ impl Processor {
                 stake_config_info.clone(),
                 pool_authority_info.clone(),
             ],
-            signers,
+            authority_signers,
         )?;
 
         // could mint the token here if we wanted, either to user or incinerator

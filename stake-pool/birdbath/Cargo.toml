@@ -33,6 +33,7 @@ solana-program-test = "1.14.10"
 solana-sdk = "1.14.10"
 solana-vote-program = "1.14.10"
 test-case = "2.2"
+spl-associated-token-account = { version = "1.1", path = "../../associated-token-account/program", features = [ "no-entrypoint" ] }
 
 [lib]
 crate-type = ["cdylib", "lib"]
