@@ -578,6 +578,7 @@ impl Processor {
         let pool_mint_info = next_account_info(account_info_iter)?;
         let user_stake_info = next_account_info(account_info_iter)?;
         let user_token_account_info = next_account_info(account_info_iter)?;
+        let user_lamport_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
         let stake_history_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
@@ -625,6 +626,19 @@ impl Processor {
             .stake
             .checked_sub(pre_validator_stake.delegation.stake)
             .ok_or(StakePoolError::CalculationFailure)?;
+
+        // XXX wrong, we need to umm
+        // ok rethink the deposit logic from scratch
+        // we get a user stake account, it has a given amount of stake and lamports
+        // deserialize it, deserialize ours. also rename the fucking variables, pre_all_ is a multipool artifact
+        // record all four numbers
+        // do the merge
+        // get the new post numbers
+        // now, what shoudl we calculate, and what should we see?
+        // * our stake increased by their stake amount
+        // * our lamps increased by their lamps amount
+        // and thus we can return their lamps minus their stake because thats our delta
+        // aaaanyway, keep going with the test, fix this once i hit this panic!
 
         if total_deposit_lamports != total_stake_deposit {
             panic!("error here? im 70% sure the user can pull rent so that we dont need to give lamports back at all");

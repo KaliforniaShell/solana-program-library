@@ -16,7 +16,7 @@ use {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
 pub enum StakePoolInstruction {
-    ///   Initializes a new [bikeshed name].
+    ///   Initialize a new [bikeshed name].
     ///
     ///   0. `[]` Validator vote account
     ///   1. `[s, w]` Fee-payer
@@ -40,10 +40,11 @@ pub enum StakePoolInstruction {
     ///   2. `[w]` Pool token mint
     ///   3. `[w]` User stake account to join to the pool
     ///   4. `[w]` User account to receive pool tokens
-    ///   5. `[]` Clock sysvar
-    ///   6. `[]` Stake history sysvar
-    ///   7. `[]` Token program
-    ///   8. `[]` Stake program
+    ///   5. `[w]` User account to receive lamports
+    ///   6. `[]` Clock sysvar
+    ///   7. `[]` Stake history sysvar
+    ///   8. `[]` Token program
+    ///   9. `[]` Stake program
     HanaDepositStake {
         /// Validator vote account address
         vote_account_address: Pubkey,
@@ -109,7 +110,7 @@ pub enum StakePoolInstruction {
     },
 }
 
-/// Creates an 'initialize' instruction.
+/// Creates an `Initialize` instruction.
 pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Instruction {
     let data = StakePoolInstruction::HanaInitialize.try_to_vec().unwrap();
     let accounts = vec![
@@ -143,63 +144,60 @@ pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) ->
     }
 }
 
-/// FIXME unchanged from original
+/// Creates a `DepositStake` instruction.
 pub fn deposit_stake(
     program_id: &Pubkey,
-    stake_pool: &Pubkey,
-    validator_list_storage: &Pubkey,
-    stake_pool_withdraw_authority: &Pubkey,
-    deposit_stake_address: &Pubkey,
-    deposit_stake_withdraw_authority: &Pubkey,
-    validator_stake_account: &Pubkey,
-    reserve_stake_account: &Pubkey,
-    pool_tokens_to: &Pubkey,
-    manager_fee_account: &Pubkey,
-    referrer_pool_tokens_account: &Pubkey,
-    pool_mint: &Pubkey,
-    token_program_id: &Pubkey,
+    vote_account: &Pubkey,
+    user_stake_account: &Pubkey,
+    user_token_account: &Pubkey,
+    user_lamport_account: &Pubkey,
+    user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
-    let stake_pool_deposit_authority = Pubkey::default(); //FIXME find_deposit_authority_program_address(program_id, stake_pool).0;
+    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
+    let data = StakePoolInstruction::HanaDepositStake {
+        vote_account_address: *vote_account,
+    }
+    .try_to_vec()
+    .unwrap();
+
     let accounts = vec![
-        AccountMeta::new(*stake_pool, false),
-        AccountMeta::new(*validator_list_storage, false),
-        AccountMeta::new_readonly(stake_pool_deposit_authority, false),
-        AccountMeta::new_readonly(*stake_pool_withdraw_authority, false),
-        AccountMeta::new(*deposit_stake_address, false),
-        AccountMeta::new(*validator_stake_account, false),
-        AccountMeta::new(*reserve_stake_account, false),
-        AccountMeta::new(*pool_tokens_to, false),
-        AccountMeta::new(*manager_fee_account, false),
-        AccountMeta::new(*referrer_pool_tokens_account, false),
-        AccountMeta::new(*pool_mint, false),
+        AccountMeta::new(
+            crate::find_pool_stake_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new_readonly(pool_authority, false),
+        AccountMeta::new(
+            crate::find_pool_mint_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(*user_stake_account, false),
+        AccountMeta::new(*user_token_account, false),
+        AccountMeta::new(*user_lamport_account, false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(*token_program_id, false),
+        AccountMeta::new_readonly(spl_token::id(), false),
         AccountMeta::new_readonly(stake::program::id(), false),
     ];
+
     vec![
         stake::instruction::authorize(
-            deposit_stake_address,
-            deposit_stake_withdraw_authority,
-            &stake_pool_deposit_authority,
+            user_stake_account,
+            user_withdraw_authority,
+            &pool_authority,
             stake::state::StakeAuthorize::Staker,
             None,
         ),
         stake::instruction::authorize(
-            deposit_stake_address,
-            deposit_stake_withdraw_authority,
-            &stake_pool_deposit_authority,
+            user_stake_account,
+            user_withdraw_authority,
+            &pool_authority,
             stake::state::StakeAuthorize::Withdrawer,
             None,
         ),
         Instruction {
             program_id: *program_id,
             accounts,
-            data: StakePoolInstruction::HanaDepositStake {
-                vote_account_address: Pubkey::default(),
-            }
-            .try_to_vec()
-            .unwrap(),
+            data,
         },
     ]
 }

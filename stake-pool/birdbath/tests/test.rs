@@ -40,6 +40,8 @@ use {
 // ideally for real tests we would reuse as much existing code as possible
 // ie all tests that make sense for both pool programs should exist in one place and be generic over both
 
+pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
+
 struct PoolAccounts {
     validator: Keypair,
     vote_account: Keypair,
@@ -112,7 +114,6 @@ async fn create_ata(
     owner: &Pubkey,
     recent_blockhash: &Hash,
     pool_mint: &Pubkey,
-    authority: &Keypair,
 ) -> Result<(), TransportError> {
     #[allow(deprecated)]
     let instruction = atoken::create_associated_token_account(&payer.pubkey(), owner, pool_mint);
@@ -162,6 +163,56 @@ async fn create_vote(
     banks_client.process_transaction(transaction).await.unwrap();
 }
 
+async fn create_independent_stake_account(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    stake: &Keypair,
+    authorized: &stake::state::Authorized,
+    lockup: &stake::state::Lockup,
+    stake_amount: u64,
+) -> u64 {
+    let rent = banks_client.get_rent().await.unwrap();
+    let lamports =
+        rent.minimum_balance(std::mem::size_of::<stake::state::StakeState>()) + stake_amount;
+
+    let transaction = Transaction::new_signed_with_payer(
+        &stake::instruction::create_account(
+            &payer.pubkey(),
+            &stake.pubkey(),
+            authorized,
+            lockup,
+            lamports,
+        ),
+        Some(&payer.pubkey()),
+        &[payer, stake],
+        *recent_blockhash,
+    );
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    lamports
+}
+
+async fn delegate_stake_account(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    stake: &Pubkey,
+    authorized: &Keypair,
+    vote: &Pubkey,
+) {
+    let mut transaction = Transaction::new_with_payer(
+        &[stake::instruction::delegate_stake(
+            stake,
+            &authorized.pubkey(),
+            vote,
+        )],
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[payer, authorized], *recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+}
+
 #[tokio::test]
 async fn initialize_success() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
@@ -178,4 +229,103 @@ async fn initialize_success() {
     // stake account exists
     let stake_account = get_account(&mut banks_client, &pool_accounts.stake_account).await;
     assert_eq!(stake_account.owner, stake::program::id());
+}
+
+#[tokio::test]
+async fn deposit_withdraw_success() {
+    let mut context = program_test().start_with_context().await;
+    let pool_accounts = PoolAccounts::new();
+    pool_accounts
+        .initialize_pool(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+        )
+        .await
+        .unwrap();
+
+    let user = Keypair::new();
+    create_ata(
+        &mut context.banks_client,
+        &context.payer,
+        &user.pubkey(),
+        &context.last_blockhash,
+        &pool_accounts.mint,
+    )
+    .await
+    .unwrap();
+    let user_token = atoken::get_associated_token_address(&user.pubkey(), &pool_accounts.mint);
+
+    let user_stake = Keypair::new();
+    let lockup = stake::state::Lockup::default();
+
+    let authorized = stake::state::Authorized {
+        staker: user.pubkey(),
+        withdrawer: user.pubkey(),
+    };
+
+    let stake_lamports = create_independent_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &user_stake,
+        &authorized,
+        &lockup,
+        TEST_STAKE_AMOUNT,
+    )
+    .await;
+
+    delegate_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &user_stake.pubkey(),
+        &user,
+        &pool_accounts.vote_account.pubkey(),
+    )
+    .await;
+
+    // XXX ok what needs to happen here
+    // * create_independent_stake_account, for the user stake
+    // * delegate_stake_account, to activate it
+    // X use warp_to_slot to advance to an activated stake
+    // * create user token account
+    // * deposit! which consists of:
+    //   - withdraw rent (if possible)
+    //   - change both authorities
+    //   - deposit
+    //   if not possible just provide a return address
+    // reading the withdraw code is a little confusing
+    // im not exactly clear on whether i can take the rent out or not
+    //
+    // ok nm i understand now
+    // withdraw fails if youre staked and trying to take out more than excess lamps
+    // ie you can withdraw neither stake nor rent
+    // if youre not staked then you can withdraw excess or you can withdraw all
+    // but cannot leave it below the rent-exempt reserve
+    // so the flow here has to be merge then withdraw
+
+    let first_normal_slot = context.genesis_config().epoch_schedule.first_normal_slot;
+    context.warp_to_slot(first_normal_slot).unwrap();
+
+    let instructions = spl_stake_birdbath::instruction::deposit_stake(
+        &id(),
+        &pool_accounts.vote_account.pubkey(),
+        &user_stake.pubkey(),
+        &user_token,
+        &user.pubkey(),
+        &user.pubkey(),
+    );
+    let message = Message::new(&instructions, Some(&context.payer.pubkey()));
+    let transaction = Transaction::new(&[&context.payer, &user], message, context.last_blockhash);
+
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
+
+    // XXX HANA hurrah, success. we hit the panic like i expected
+    // tomorrow (ok well maybe friday i need to do code reviews...) fix the calculations as detailed in program
+    // and then deposit should Just Work
 }
