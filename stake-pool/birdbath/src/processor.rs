@@ -348,6 +348,47 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn stake_withdraw<'a>(
+        validator_vote_key: &Pubkey,
+        stake_account: AccountInfo<'a>,
+        stake_authority: AccountInfo<'a>,
+        bump_seed: u8,
+        destination_account: AccountInfo<'a>,
+        clock: AccountInfo<'a>,
+        stake_history: AccountInfo<'a>,
+        stake_program_info: AccountInfo<'a>,
+        lamports: u64,
+    ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
+        let withdraw_instruction = stake::instruction::withdraw(
+            stake_account.key,
+            stake_authority.key,
+            destination_account.key,
+            lamports,
+            None,
+        );
+
+        invoke_signed(
+            &withdraw_instruction,
+            &[
+                stake_account,
+                destination_account,
+                clock,
+                stake_history,
+                stake_authority,
+                stake_program_info,
+            ],
+            signers,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn hana_token_mint_to<'a>(
         validator_vote_key: &Pubkey,
         token_program: AccountInfo<'a>,
@@ -594,9 +635,17 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
+        // TODO assert pool stake state is active
+
         let (_, pre_validator_stake) = get_stake_state(pool_stake_info)?;
-        let pre_all_validator_lamports = pool_stake_info.lamports();
+        let pre_validator_lamports = pool_stake_info.lamports();
         msg!("Stake pre merge {}", pre_validator_stake.delegation.stake);
+
+        let (_, pre_user_stake) = get_stake_state(user_stake_info)?;
+        let user_unstaked_lamports = user_stake_info
+            .lamports()
+            .checked_sub(pre_user_stake.delegation.stake)
+            .ok_or(StakePoolError::CalculationFailure)?;
 
         // we have no deposit authority, so we dont need to call stake_authorize
         // user should set both authorities to pool_authority_info
@@ -614,34 +663,33 @@ impl Processor {
         )?;
 
         let (_, post_validator_stake) = get_stake_state(pool_stake_info)?;
-        let post_all_validator_lamports = pool_stake_info.lamports();
+        let post_validator_lamports = pool_stake_info.lamports();
         msg!("Stake post merge {}", post_validator_stake.delegation.stake);
 
-        let total_deposit_lamports = post_all_validator_lamports
-            .checked_sub(pre_all_validator_lamports)
+        let lamports_added = post_validator_lamports
+            .checked_sub(pre_validator_lamports)
             .ok_or(StakePoolError::CalculationFailure)?;
 
-        let total_stake_deposit = post_validator_stake
+        let stake_added = post_validator_stake
             .delegation
             .stake
             .checked_sub(pre_validator_stake.delegation.stake)
             .ok_or(StakePoolError::CalculationFailure)?;
 
-        // XXX wrong, we need to umm
-        // ok rethink the deposit logic from scratch
-        // we get a user stake account, it has a given amount of stake and lamports
-        // deserialize it, deserialize ours. also rename the fucking variables, pre_all_ is a multipool artifact
-        // record all four numbers
-        // do the merge
-        // get the new post numbers
-        // now, what shoudl we calculate, and what should we see?
-        // * our stake increased by their stake amount
-        // * our lamps increased by their lamps amount
-        // and thus we can return their lamps minus their stake because thats our delta
-        // aaaanyway, keep going with the test, fix this once i hit this panic!
+        let leftover_rent = lamports_added
+            .checked_sub(stake_added)
+            .ok_or(StakePoolError::CalculationFailure)?;
 
-        if total_deposit_lamports != total_stake_deposit {
-            panic!("error here? im 70% sure the user can pull rent so that we dont need to give lamports back at all");
+        if stake_added != pre_user_stake.delegation.stake {
+            panic!("sanity check failed");
+        }
+
+        if leftover_rent != user_unstaked_lamports {
+            panic!("sanity check failed");
+        }
+
+        if user_stake_info.lamports() != 0 {
+            panic!("sanity check failed");
         }
 
         let token_supply = {
@@ -650,12 +698,9 @@ impl Processor {
             pool_mint.base.supply
         };
 
-        let new_pool_tokens = calculate_deposit_amount(
-            token_supply,
-            pre_all_validator_lamports,
-            total_deposit_lamports,
-        )
-        .ok_or(StakePoolError::CalculationFailure)?;
+        let new_pool_tokens =
+            calculate_deposit_amount(token_supply, pre_validator_lamports, lamports_added)
+                .ok_or(StakePoolError::CalculationFailure)?;
 
         if new_pool_tokens == 0 {
             return Err(StakePoolError::DepositTooSmall.into());
@@ -669,6 +714,18 @@ impl Processor {
             pool_authority_info.clone(),
             bump_seed,
             new_pool_tokens,
+        )?;
+
+        Self::stake_withdraw(
+            vote_account_address,
+            pool_stake_info.clone(),
+            pool_authority_info.clone(),
+            bump_seed,
+            user_lamport_account_info.clone(),
+            clock_info.clone(),
+            stake_history_info.clone(),
+            stake_program_info.clone(),
+            leftover_rent,
         )?;
 
         Ok(())

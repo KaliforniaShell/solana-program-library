@@ -325,7 +325,13 @@ async fn deposit_withdraw_success() {
         .await
         .unwrap();
 
-    // XXX HANA hurrah, success. we hit the panic like i expected
-    // tomorrow (ok well maybe friday i need to do code reviews...) fix the calculations as detailed in program
-    // and then deposit should Just Work
+    // Original stake account should be drained
+    assert!(context
+        .banks_client
+        .get_account(user_stake.pubkey())
+        .await
+        .expect("get_account")
+        .is_none());
+
+    // TODO check stake balance, check user got their lamports, check user tokens...
 }
