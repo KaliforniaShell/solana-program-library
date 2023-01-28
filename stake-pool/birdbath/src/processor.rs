@@ -240,7 +240,7 @@ fn check_account_owner(
 pub struct Processor {}
 impl Processor {
     #[allow(clippy::too_many_arguments)]
-    fn hana_stake_merge<'a>(
+    fn stake_merge<'a>(
         validator_vote_key: &Pubkey,
         source_account: AccountInfo<'a>,
         authority: AccountInfo<'a>,
@@ -272,7 +272,7 @@ impl Processor {
         )
     }
 
-    fn hana_stake_split<'a>(
+    fn stake_split<'a>(
         validator_vote_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         authority: AccountInfo<'a>,
@@ -298,7 +298,7 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn hana_stake_authorize_signed<'a>(
+    fn stake_authorize_signed<'a>(
         validator_vote_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         stake_authority: AccountInfo<'a>,
@@ -389,7 +389,7 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn hana_token_mint_to<'a>(
+    fn token_mint_to<'a>(
         validator_vote_key: &Pubkey,
         token_program: AccountInfo<'a>,
         mint: AccountInfo<'a>,
@@ -418,7 +418,7 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn hana_token_burn<'a>(
+    fn token_burn<'a>(
         token_program: AccountInfo<'a>,
         burn_account: AccountInfo<'a>,
         mint: AccountInfo<'a>,
@@ -438,7 +438,7 @@ impl Processor {
     }
 
     #[inline(never)] // needed due to stack size violation
-    fn process_hana_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let validator_vote_info = next_account_info(account_info_iter)?;
         let payer_info = next_account_info(account_info_iter)?;
@@ -608,7 +608,7 @@ impl Processor {
     // if its not possible tho just take a wallet do the merge and send back the extra lamps
 
     #[inline(never)] // needed to avoid stack size violation
-    fn process_hana_deposit_stake(
+    fn process_deposit_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         vote_account_address: &Pubkey,
@@ -651,7 +651,7 @@ impl Processor {
         // user should set both authorities to pool_authority_info
         // the merge succeeding implicitly validates all properties of the user stake account
 
-        Self::hana_stake_merge(
+        Self::stake_merge(
             vote_account_address,
             user_stake_info.clone(),
             pool_authority_info.clone(),
@@ -706,7 +706,7 @@ impl Processor {
             return Err(StakePoolError::DepositTooSmall.into());
         }
 
-        Self::hana_token_mint_to(
+        Self::token_mint_to(
             vote_account_address,
             token_program_info.clone(),
             pool_mint_info.clone(),
@@ -732,7 +732,7 @@ impl Processor {
     }
 
     #[inline(never)] // needed to avoid stack size violation
-    fn process_hana_withdraw_stake(
+    fn process_withdraw_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         vote_account_address: &Pubkey,
@@ -782,7 +782,7 @@ impl Processor {
         // but its all basically "we have a reserve and n validators and m transient accounts, whence stake?"
         // here in stupidland we have no need of any of that
 
-        Self::hana_token_burn(
+        Self::token_burn(
             token_program_info.clone(),
             user_token_account_info.clone(),
             pool_mint_info.clone(),
@@ -790,7 +790,7 @@ impl Processor {
             burn_tokens,
         )?;
 
-        Self::hana_stake_split(
+        Self::stake_split(
             vote_account_address,
             pool_stake_info.clone(),
             pool_authority_info.clone(),
@@ -799,7 +799,7 @@ impl Processor {
             user_stake_info.clone(),
         )?;
 
-        Self::hana_stake_authorize_signed(
+        Self::stake_authorize_signed(
             vote_account_address,
             user_stake_info.clone(),
             pool_authority_info.clone(),
@@ -1000,27 +1000,22 @@ impl Processor {
                 msg!("Instruction: UpdateTokenMetadata");
                 Self::process_update_pool_token_metadata(program_id, accounts, name, symbol, uri)
             }
-            StakePoolInstruction::HanaInitialize => {
-                msg!("Instruction: HanaInitialize");
-                Self::process_hana_initialize(program_id, accounts)
+            StakePoolInstruction::Initialize => {
+                msg!("Instruction: Initialize");
+                Self::process_initialize(program_id, accounts)
             }
-            StakePoolInstruction::HanaDepositStake {
+            StakePoolInstruction::DepositStake {
                 vote_account_address,
             } => {
                 msg!("Instruction: DepositStake");
-                Self::process_hana_deposit_stake(program_id, accounts, &vote_account_address)
+                Self::process_deposit_stake(program_id, accounts, &vote_account_address)
             }
-            StakePoolInstruction::HanaWithdrawStake {
+            StakePoolInstruction::WithdrawStake {
                 vote_account_address,
                 amount,
             } => {
                 msg!("Instruction: WithdrawStake");
-                Self::process_hana_withdraw_stake(
-                    program_id,
-                    accounts,
-                    &vote_account_address,
-                    amount,
-                )
+                Self::process_withdraw_stake(program_id, accounts, &vote_account_address, amount)
             }
         }
     }

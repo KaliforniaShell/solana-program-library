@@ -16,8 +16,6 @@ use solana_program::pubkey::Pubkey;
 // XXX change this
 solana_program::declare_id!("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
 
-// XXX HANA hana zone
-
 const POOL_STAKE_PREFIX: &[u8] = b"stake";
 const POOL_AUTHORITY_PREFIX: &[u8] = b"authority";
 const POOL_MINT_PREFIX: &[u8] = b"mint";

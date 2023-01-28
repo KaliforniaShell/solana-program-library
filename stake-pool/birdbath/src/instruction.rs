@@ -30,7 +30,7 @@ pub enum StakePoolInstruction {
     ///   9. `[]` System program
     ///  10. `[]` Token program
     ///  11. `[]` Stake program
-    HanaInitialize,
+    Initialize,
 
     ///   Deposit some stake into the pool.  The output is a "pool" token representing ownership
     ///   into the pool. Inputs are converted to the current ratio.
@@ -45,7 +45,7 @@ pub enum StakePoolInstruction {
     ///   7. `[]` Stake history sysvar
     ///   8. `[]` Token program
     ///   9. `[]` Stake program
-    HanaDepositStake {
+    DepositStake {
         /// Validator vote account address
         vote_account_address: Pubkey,
     },
@@ -64,7 +64,7 @@ pub enum StakePoolInstruction {
     ///   7. `[]` Clock sysvar
     ///   8. `[]` Token program
     ///   9. `[]` Stake program
-    HanaWithdrawStake {
+    WithdrawStake {
         /// Validator vote account address
         vote_account_address: Pubkey,
         /// Amount of tokens to redeem for stake
@@ -112,7 +112,7 @@ pub enum StakePoolInstruction {
 
 /// Creates an `Initialize` instruction.
 pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Instruction {
-    let data = StakePoolInstruction::HanaInitialize.try_to_vec().unwrap();
+    let data = StakePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
         AccountMeta::new(*payer, true),
@@ -154,7 +154,7 @@ pub fn deposit_stake(
     user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let data = StakePoolInstruction::HanaDepositStake {
+    let data = StakePoolInstruction::DepositStake {
         vote_account_address: *vote_account,
     }
     .try_to_vec()
@@ -236,7 +236,7 @@ pub fn withdraw_stake(
     Instruction {
         program_id: *program_id,
         accounts,
-        data: StakePoolInstruction::HanaWithdrawStake {
+        data: StakePoolInstruction::WithdrawStake {
             vote_account_address: Pubkey::default(),
             amount,
         }
