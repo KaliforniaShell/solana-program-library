@@ -193,6 +193,32 @@ async fn create_independent_stake_account(
     lamports
 }
 
+async fn create_blank_stake_account(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    stake: &Keypair,
+) -> u64 {
+    let rent = banks_client.get_rent().await.unwrap();
+    let lamports = rent.minimum_balance(std::mem::size_of::<stake::state::StakeState>()) + 1;
+
+    let transaction = Transaction::new_signed_with_payer(
+        &[system_instruction::create_account(
+            &payer.pubkey(),
+            &stake.pubkey(),
+            lamports,
+            std::mem::size_of::<stake::state::StakeState>() as u64,
+            &stake::program::id(),
+        )],
+        Some(&payer.pubkey()),
+        &[payer, stake],
+        *recent_blockhash,
+    );
+    banks_client.process_transaction(transaction).await.unwrap();
+
+    lamports
+}
+
 async fn delegate_stake_account(
     banks_client: &mut BanksClient,
     payer: &Keypair,

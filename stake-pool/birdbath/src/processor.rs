@@ -18,7 +18,7 @@ use {
         decode_error::DecodeError,
         entrypoint::ProgramResult,
         msg,
-        program::{invoke, invoke_signed},
+        program::invoke_signed,
         program_error::{PrintProgramError, ProgramError},
         program_pack::Pack,
         pubkey::Pubkey,
@@ -298,7 +298,7 @@ impl Processor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn stake_authorize_signed<'a>(
+    fn stake_authorize<'a>(
         validator_vote_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         stake_authority: AccountInfo<'a>,
@@ -419,12 +419,21 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     fn token_burn<'a>(
+        validator_vote_key: &Pubkey,
         token_program: AccountInfo<'a>,
         burn_account: AccountInfo<'a>,
         mint: AccountInfo<'a>,
         authority: AccountInfo<'a>,
+        bump_seed: u8,
         amount: u64,
     ) -> Result<(), ProgramError> {
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_key.as_ref(),
+            &[bump_seed],
+        ];
+        let signers = &[&authority_seeds[..]];
+
         let ix = spl_token::instruction::burn(
             token_program.key,
             burn_account.key,
@@ -434,7 +443,11 @@ impl Processor {
             amount,
         )?;
 
-        invoke(&ix, &[burn_account, mint, authority, token_program])
+        invoke_signed(
+            &ix,
+            &[burn_account, mint, authority, token_program],
+            signers,
+        )
     }
 
     #[inline(never)] // needed due to stack size violation
@@ -651,6 +664,7 @@ impl Processor {
         // user should set both authorities to pool_authority_info
         // the merge succeeding implicitly validates all properties of the user stake account
 
+        // merge the user stake account, which is preauthed to us, into the pool stake account
         Self::stake_merge(
             vote_account_address,
             user_stake_info.clone(),
@@ -706,6 +720,7 @@ impl Processor {
             return Err(StakePoolError::DepositTooSmall.into());
         }
 
+        // mint tokens to the user corresponding to their deposit
         Self::token_mint_to(
             vote_account_address,
             token_program_info.clone(),
@@ -716,6 +731,7 @@ impl Processor {
             new_pool_tokens,
         )?;
 
+        // return the lamports their stake account used to contain for rent-exemption
         Self::stake_withdraw(
             vote_account_address,
             pool_stake_info.clone(),
@@ -736,16 +752,15 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         vote_account_address: &Pubkey,
-        burn_tokens: u64,
+        user_stake_authority: &Pubkey,
+        token_amount: u64,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let user_stake_info = next_account_info(account_info_iter)?;
-        let user_stake_authority_info = next_account_info(account_info_iter)?;
         let user_token_account_info = next_account_info(account_info_iter)?;
-        let user_transfer_authority_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
@@ -771,7 +786,7 @@ impl Processor {
         };
 
         let withdraw_lamports =
-            calculate_withdraw_amount(token_supply, pre_all_validator_lamports, burn_tokens)
+            calculate_withdraw_amount(token_supply, pre_all_validator_lamports, token_amount)
                 .ok_or(StakePoolError::CalculationFailure)?;
 
         if withdraw_lamports == 0 {
@@ -782,14 +797,18 @@ impl Processor {
         // but its all basically "we have a reserve and n validators and m transient accounts, whence stake?"
         // here in stupidland we have no need of any of that
 
+        // burn user tokens corresponding to the amount of stake they wish to withdraw
         Self::token_burn(
+            vote_account_address,
             token_program_info.clone(),
             user_token_account_info.clone(),
             pool_mint_info.clone(),
-            user_transfer_authority_info.clone(),
-            burn_tokens,
+            pool_authority_info.clone(),
+            bump_seed,
+            token_amount,
         )?;
 
+        // split stake into a blank stake account the user has created for this purpose
         Self::stake_split(
             vote_account_address,
             pool_stake_info.clone(),
@@ -799,12 +818,13 @@ impl Processor {
             user_stake_info.clone(),
         )?;
 
-        Self::stake_authorize_signed(
+        // assign both authorities on the new stake account to the user
+        Self::stake_authorize(
             vote_account_address,
             user_stake_info.clone(),
             pool_authority_info.clone(),
             bump_seed,
-            user_stake_authority_info.key,
+            user_stake_authority,
             clock_info.clone(),
             stake_program_info.clone(),
         )?;
@@ -1012,10 +1032,17 @@ impl Processor {
             }
             StakePoolInstruction::WithdrawStake {
                 vote_account_address,
-                amount,
+                user_stake_authority,
+                token_amount,
             } => {
                 msg!("Instruction: WithdrawStake");
-                Self::process_withdraw_stake(program_id, accounts, &vote_account_address, amount)
+                Self::process_withdraw_stake(
+                    program_id,
+                    accounts,
+                    &vote_account_address,
+                    &user_stake_authority,
+                    token_amount,
+                )
             }
         }
     }
