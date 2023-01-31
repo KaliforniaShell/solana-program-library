@@ -351,7 +351,6 @@ async fn deposit_withdraw_success() {
         .await
         .unwrap();
 
-    // Original stake account should be drained
     assert!(context
         .banks_client
         .get_account(user_stake.pubkey())
@@ -360,4 +359,42 @@ async fn deposit_withdraw_success() {
         .is_none());
 
     // TODO check stake balance, check user got their lamports, check user tokens...
+
+    let recipient_stake = Keypair::new();
+    create_blank_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &recipient_stake,
+    )
+    .await;
+
+    let instructions = spl_stake_birdbath::instruction::withdraw_stake(
+        &id(),
+        &pool_accounts.vote_account.pubkey(),
+        &recipient_stake.pubkey(),
+        &user.pubkey(),
+        &user_token,
+        &user.pubkey(),
+        TEST_STAKE_AMOUNT,
+    );
+    let message = Message::new(&instructions, Some(&context.payer.pubkey()));
+    let transaction = Transaction::new(&[&context.payer, &user], message, context.last_blockhash);
+
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
+
+    assert!(
+        context
+            .banks_client
+            .get_account(recipient_stake.pubkey())
+            .await
+            .unwrap()
+            .unwrap()
+            .lamports
+            > TEST_STAKE_AMOUNT
+    );
 }

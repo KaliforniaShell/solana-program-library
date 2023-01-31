@@ -241,7 +241,7 @@ pub fn withdraw_stake(
 
     vec![
         spl_token::instruction::approve(
-            program_id,
+            &spl_token::id(),
             user_token_account,
             &pool_authority,
             user_token_authority,
