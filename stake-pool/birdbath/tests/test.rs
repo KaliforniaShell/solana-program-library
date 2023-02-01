@@ -17,6 +17,7 @@ use {
         compute_budget::ComputeBudgetInstruction,
         feature_set::stake_raise_minimum_delegation_to_1_sol,
         message::Message,
+        native_token::LAMPORTS_PER_SOL,
         signature::{Keypair, Signer},
         transaction::Transaction,
         transport::TransportError,
@@ -239,6 +240,26 @@ async fn delegate_stake_account(
     banks_client.process_transaction(transaction).await.unwrap();
 }
 
+async fn transfer(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    recipient: &Pubkey,
+    amount: u64,
+) {
+    let transaction = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &payer.pubkey(),
+            recipient,
+            amount,
+        )],
+        Some(&payer.pubkey()),
+        &[payer],
+        *recent_blockhash,
+    );
+    banks_client.process_transaction(transaction).await.unwrap();
+}
+
 #[tokio::test]
 async fn initialize_success() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
@@ -271,9 +292,18 @@ async fn deposit_withdraw_success() {
         .unwrap();
 
     let user = Keypair::new();
-    create_ata(
+    transfer(
         &mut context.banks_client,
         &context.payer,
+        &context.last_blockhash,
+        &user.pubkey(),
+        LAMPORTS_PER_SOL * 1000,
+    )
+    .await;
+
+    create_ata(
+        &mut context.banks_client,
+        &user,
         &user.pubkey(),
         &context.last_blockhash,
         &pool_accounts.mint,
@@ -281,6 +311,14 @@ async fn deposit_withdraw_success() {
     .await
     .unwrap();
     let user_token = atoken::get_associated_token_address(&user.pubkey(), &pool_accounts.mint);
+
+    let lamps_before = context
+        .banks_client
+        .get_account(user.pubkey())
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports;
 
     let user_stake = Keypair::new();
     let lockup = stake::state::Lockup::default();
@@ -292,7 +330,7 @@ async fn deposit_withdraw_success() {
 
     let stake_lamports = create_independent_stake_account(
         &mut context.banks_client,
-        &context.payer,
+        &user,
         &context.last_blockhash,
         &user_stake,
         &authorized,
@@ -303,13 +341,21 @@ async fn deposit_withdraw_success() {
 
     delegate_stake_account(
         &mut context.banks_client,
-        &context.payer,
+        &user,
         &context.last_blockhash,
         &user_stake.pubkey(),
         &user,
         &pool_accounts.vote_account.pubkey(),
     )
     .await;
+
+    let lamps_after_stake = context
+        .banks_client
+        .get_account(user.pubkey())
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports;
 
     // XXX ok what needs to happen here
     // * create_independent_stake_account, for the user stake
@@ -342,8 +388,8 @@ async fn deposit_withdraw_success() {
         &user.pubkey(),
         &user.pubkey(),
     );
-    let message = Message::new(&instructions, Some(&context.payer.pubkey()));
-    let transaction = Transaction::new(&[&context.payer, &user], message, context.last_blockhash);
+    let message = Message::new(&instructions, Some(&user.pubkey()));
+    let transaction = Transaction::new(&[&user], message, context.last_blockhash);
 
     context
         .banks_client
@@ -358,12 +404,21 @@ async fn deposit_withdraw_success() {
         .expect("get_account")
         .is_none());
 
+    let lamps_after_deposit = context
+        .banks_client
+        .get_account(user.pubkey())
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports;
+    println!("HANA lamps before staking: {}\n     lamps after staking: {} ({} less than before, {} excluding stake)\n     lamps after deposit: {} ({} more than before)", lamps_before, lamps_after_stake, lamps_before - lamps_after_stake, lamps_before - lamps_after_stake - TEST_STAKE_AMOUNT, lamps_after_deposit, lamps_after_deposit - lamps_after_stake);
+
     // TODO check stake balance, check user got their lamports, check user tokens...
 
     let recipient_stake = Keypair::new();
     create_blank_stake_account(
         &mut context.banks_client,
-        &context.payer,
+        &user,
         &context.last_blockhash,
         &recipient_stake,
     )
@@ -378,8 +433,8 @@ async fn deposit_withdraw_success() {
         &user.pubkey(),
         TEST_STAKE_AMOUNT,
     );
-    let message = Message::new(&instructions, Some(&context.payer.pubkey()));
-    let transaction = Transaction::new(&[&context.payer, &user], message, context.last_blockhash);
+    let message = Message::new(&instructions, Some(&user.pubkey()));
+    let transaction = Transaction::new(&[&user], message, context.last_blockhash);
 
     context
         .banks_client
