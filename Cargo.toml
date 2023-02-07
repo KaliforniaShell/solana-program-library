@@ -30,6 +30,7 @@ members = [
   "stake-pool/cli",
   "stake-pool/program",
   "stake-pool/birdbath",
+  "stake-pool/stake-pool-test",
   "stateless-asks/program",
   "token-lending/cli",
   "token-lending/program",

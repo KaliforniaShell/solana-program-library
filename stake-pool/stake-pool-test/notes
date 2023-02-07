@@ -1,0 +1,28 @@
+XXX OK what the FUCK am i doing
+this has not fucking worked so far im fucking pissed
+i have been trying to do this bottom up by moving code over and making it more general
+stupid fucking idea. i think i need to work top down for this shit
+
+which means. i need to figure out um
+
+...
+
+basically i need a generic framework for testing both sorts of pools
+shared functionality like
+* set up the pool
+* make a stake account
+* check what the balance is supposed to be
+* check our acocunts look right
+
+i want to do this with test-case
+umm. ok. so the other thing is what am i calling everything
+* pool/single-pool/multi-pool
+* intermediary/passthrough/pool
+both of these are confusing tho because they imply something plural is singular
+eg "single" pool actually has many stakes, just one validator
+likewise with "intermediary"
+its not a single and a multi it's like... a mux and a mux+demux? lol
+
+anyway fucking who cares. call it cow and horse. whatever
+i want two accounts structs, like i have in both test setups
+and then a trait over them that has all the useful functions on it

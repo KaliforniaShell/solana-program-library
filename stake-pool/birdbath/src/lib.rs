@@ -14,7 +14,7 @@ pub use solana_program;
 use solana_program::pubkey::Pubkey;
 
 // XXX change this
-solana_program::declare_id!("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
+solana_program::declare_id!("3cqnsMsT6LE96pxv7GR4di5rLqHDZZbR3FbeSUeRLFqY");
 
 const POOL_STAKE_PREFIX: &[u8] = b"stake";
 const POOL_AUTHORITY_PREFIX: &[u8] = b"authority";

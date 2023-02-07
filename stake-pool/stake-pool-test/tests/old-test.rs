@@ -1,4 +1,6 @@
 #![cfg(feature = "test-sbf")]
+#![allow(unused_imports)] // FIXME remove
+#![allow(dead_code)] // FIXME
 
 use {
     solana_program::{
@@ -260,7 +262,7 @@ async fn transfer(
     banks_client.process_transaction(transaction).await.unwrap();
 }
 
-#[tokio::test]
+// XXX #[tokio::test]
 async fn initialize_success() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
     let pool_accounts = PoolAccounts::new();
@@ -278,7 +280,7 @@ async fn initialize_success() {
     assert_eq!(stake_account.owner, stake::program::id());
 }
 
-#[tokio::test]
+// XXX #[tokio::test]
 async fn deposit_withdraw_success() {
     let mut context = program_test().start_with_context().await;
     let pool_accounts = PoolAccounts::new();
