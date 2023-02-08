@@ -28,9 +28,9 @@ use {
     test_case::test_case,
 };
 
-#[test_case(Env::SinglePool ; "single-pool")]
-#[test_case(Env::MultiPoolTokenkeg ; "multi-pool tokenkeg")]
-#[test_case(Env::MultiPoolToken22 ; "multi-pool token22")]
+#[test_case(EnvBuilder::SinglePool.env() ; "single-pool")]
+#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
+#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
 #[tokio::test]
 async fn success(env: Env) {
     let (mut banks_client, payer, recent_blockhash) = env.program_test().start().await;
