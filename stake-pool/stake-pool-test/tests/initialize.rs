@@ -28,11 +28,11 @@ use {
     test_case::test_case,
 };
 
-#[test_case(TestCase::SinglePool ; "single-pool")]
-#[test_case(TestCase::MultiPoolTokenkeg ; "multi-pool tokenkeg")]
-#[test_case(TestCase::MultiPoolToken22 ; "multi-pool token22")]
+#[test_case(Env::SinglePool ; "single-pool")]
+#[test_case(Env::MultiPoolTokenkeg ; "multi-pool tokenkeg")]
+#[test_case(Env::MultiPoolToken22 ; "multi-pool token22")]
 #[tokio::test]
-async fn success(env: TestCase) {
+async fn success(env: Env) {
     let (mut banks_client, payer, recent_blockhash) = env.program_test().start().await;
 
     // XXX ok now how am i managine the accounts lol...
@@ -43,7 +43,7 @@ async fn success(env: TestCase) {
     // alternatively uh... well, traits are dynamic dispatch remember, generics are static
     // wait but the... gah this is confusing
     // i cant directly access struct fields regardless of trait vs generic because
-    // so i could wrap in 
+    // so i could wrap in
 
     // ok umm hmm lets see
     // * if i make this generic over PoolAccounts types, i cant access field
@@ -51,16 +51,16 @@ async fn success(env: TestCase) {
     // * if i have a trait over both then i can impl functions that get the individual fields...
     //   i could also have two methods that return the struct as a concrete type
     //   and... just return default for one of the other...?
-    //   
+    //
 
     // ok fundamentally what actually needs to be generic...
     // i think i just need to encapsulate init, deposit, withdraw...?
-    // and all the other 
+    // and all the other
 
     // ok. cool. plan when i get back
     // two structs, trait with initialize, deposit, withdraw, and maybe some "is everything chill" validation method
     // and then... do i imple stuff like create stake account on it?
-    // hmm actually what if instead of a trait i just... impled everything on TestCase
+    // hmm actually what if instead of a trait i just... impled everything on Env
     // change it to Env maybe. so env.initialize_pool() and so on
     // and it can carry all the logic, impled once or twice as needed. actually this is perfect yea
     // if we need to get any addresses out we have functions for those too. perfect
