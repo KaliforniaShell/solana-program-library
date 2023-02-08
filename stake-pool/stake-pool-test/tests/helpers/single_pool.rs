@@ -2,6 +2,7 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
+    crate::create_vote,
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
@@ -19,6 +20,7 @@ use {
         clock::{Clock, Epoch},
         compute_budget::ComputeBudgetInstruction,
         feature_set::stake_raise_minimum_delegation_to_1_sol,
+        message::Message,
         signature::{Keypair, Signer},
         transaction::Transaction,
         transport::TransportError,
@@ -30,6 +32,7 @@ use {
     spl_associated_token_account as atoken,
     spl_stake_birdbath::{
         self, find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
+        instruction,
     },
     spl_token_2022::{
         extension::{ExtensionType, StateWithExtensionsOwned},
@@ -46,6 +49,33 @@ pub struct SinglePoolAccounts {
     pub authority: Pubkey,
     pub mint: Pubkey,
     pub token_program_id: Pubkey,
+}
+impl SinglePoolAccounts {
+    pub async fn initialize(
+        &self,
+        banks_client: &mut BanksClient,
+        payer: &Keypair,
+        recent_blockhash: &Hash,
+    ) -> Result<(), TransportError> {
+        create_vote(
+            banks_client,
+            payer,
+            recent_blockhash,
+            &self.validator,
+            &self.vote_account,
+        )
+        .await;
+
+        let instruction =
+            instruction::initialize(&id(), &self.vote_account.pubkey(), &payer.pubkey());
+        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let transaction = Transaction::new(&[payer], message, *recent_blockhash);
+
+        banks_client
+            .process_transaction(transaction)
+            .await
+            .map_err(|e| e.into())
+    }
 }
 impl Default for SinglePoolAccounts {
     fn default() -> Self {

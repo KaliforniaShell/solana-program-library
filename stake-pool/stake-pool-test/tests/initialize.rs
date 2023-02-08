@@ -65,18 +65,11 @@ async fn success(env: Env) {
     // and it can carry all the logic, impled once or twice as needed. actually this is perfect yea
     // if we need to get any addresses out we have functions for those too. perfect
 
-    /*
-        let stake_pool_accounts = StakePoolAccounts::new_with_token_program(token_program_id);
-        stake_pool_accounts
-            .initialize_stake_pool(
-                &mut banks_client,
-                &payer,
-                &recent_blockhash,
-                mpool::MINIMUM_RESERVE_LAMPORTS,
-            )
-            .await
-            .unwrap();
+    env.initialize(&mut banks_client, &payer, &recent_blockhash)
+        .await
+        .unwrap();
 
+    /*
         // Stake pool now exists
         let stake_pool = get_account(&mut banks_client, &stake_pool_accounts.stake_pool.pubkey()).await;
         assert_eq!(stake_pool.data.len(), get_packed_len::<state::StakePool>());
