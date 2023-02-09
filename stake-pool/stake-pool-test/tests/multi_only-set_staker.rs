@@ -33,8 +33,7 @@ async fn setup(env: &Env) -> (BanksClient, Keypair, Hash, Keypair) {
     (banks_client, payer, recent_blockhash, new_staker)
 }
 
-#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
-#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
+#[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 #[tokio::test]
 async fn success_set_staker_as_manager(env: Env) {
     if let Env::MultiPool(ref stake_pool_accounts) = env {
@@ -61,8 +60,7 @@ async fn success_set_staker_as_manager(env: Env) {
     }
 }
 
-#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
-#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
+#[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 #[tokio::test]
 async fn success_set_staker_as_staker(env: Env) {
     if let Env::MultiPool(ref stake_pool_accounts) = env {
@@ -108,8 +106,7 @@ async fn success_set_staker_as_staker(env: Env) {
     }
 }
 
-#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
-#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
+#[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 #[tokio::test]
 async fn fail_wrong_manager(env: Env) {
     if let Env::MultiPool(ref stake_pool_accounts) = env {
@@ -145,8 +142,7 @@ async fn fail_wrong_manager(env: Env) {
     }
 }
 
-#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
-#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
+#[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 #[tokio::test]
 async fn fail_set_staker_without_signature(env: Env) {
     if let Env::MultiPool(ref stake_pool_accounts) = env {

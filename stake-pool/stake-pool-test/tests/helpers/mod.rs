@@ -64,7 +64,7 @@ pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EnvBuilder {
     SinglePool,
-    MultiPoolTokenkeg,
+    MultiPool,
     MultiPoolToken22,
 }
 impl EnvBuilder {

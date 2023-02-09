@@ -32,7 +32,7 @@ use {
 };
 
 #[test_case(EnvBuilder::SinglePool.env() ; "single-pool")]
-#[test_case(EnvBuilder::MultiPoolTokenkeg.env() ; "multi-pool tokenkeg")]
+#[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 #[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
 #[tokio::test]
 async fn success(env: Env) {
