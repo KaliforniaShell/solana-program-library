@@ -96,8 +96,7 @@ pub enum Env {
 impl Env {
     pub fn program_test(&self) -> ProgramTest {
         let mut program_test = ProgramTest::default();
-        // FIXME figure out how to build this
-        // program_test.add_program("mpl_token_metadata", mpl_token_metadata::id(), None);
+        program_test.add_program("mpl_token_metadata", mpl_token_metadata::id(), None);
 
         match self {
             Env::SinglePool(_) => {
