@@ -5,7 +5,7 @@ solana_version = "1.14.10"
 members = [
   "governance/program",
   "memo/program",
-  "stake-pool/program",
+  "stake-pool/multi-pool",
   "token/program",
   "token/program-2022",
 ]

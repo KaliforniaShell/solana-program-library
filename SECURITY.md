@@ -49,7 +49,7 @@ the Solana Mainnet Beta and maintained by the team. Currently, this includes:
 * [governance](https://github.com/solana-labs/solana-program-library/tree/master/governance/program)
 * [memo](https://github.com/solana-labs/solana-program-library/tree/master/memo/program)
 * [name-service](https://github.com/solana-labs/solana-program-library/tree/master/name-service/program)
-* [stake-pool](https://github.com/solana-labs/solana-program-library/tree/master/stake-pool/program)
+* [stake-pool](https://github.com/solana-labs/solana-program-library/tree/master/stake-pool/multi-pool)
 * [token](https://github.com/solana-labs/solana-program-library/tree/master/token/program)
 
 If you discover a critical security issue in an out-of-scope program, your finding
