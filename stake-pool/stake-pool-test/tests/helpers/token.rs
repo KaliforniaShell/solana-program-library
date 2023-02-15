@@ -229,3 +229,13 @@ pub async fn create_ata(
         .await
         .map_err(|e| e.into())
 }
+
+pub async fn get_metadata_account(banks_client: &mut BanksClient, token_mint: &Pubkey) -> Metadata {
+    let (token_metadata, _) = find_metadata_account(token_mint);
+    let token_metadata_account = banks_client
+        .get_account(token_metadata)
+        .await
+        .unwrap()
+        .unwrap();
+    try_from_slice_unchecked(token_metadata_account.data.as_slice()).unwrap()
+}
