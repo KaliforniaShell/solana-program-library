@@ -51,7 +51,8 @@ fn assert_metadata(env: &Env, metadata: &Metadata) {
             assert_eq!(metadata.data.uri, puffed_uri);
         }
         Env::SinglePool(_) => {
-            panic!("todo");
+            // TODO match the actual string once we decide on one
+            assert!(!metadata.data.name.is_empty());
         }
     }
 }

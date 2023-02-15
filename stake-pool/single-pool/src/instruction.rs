@@ -69,27 +69,22 @@ pub enum StakePoolInstruction {
         token_amount: u64,
     },
 
-    // XXX as noted in processor, this actually can go away
-    // set up a sensible default in initialize. we only need update
-    /// Create token metadata for the stake-pool token in the
-    /// metaplex-token program
-    /// 0. `[]` Stake pool
-    /// 1. `[s]` Manager
-    /// 2. `[]` Stake pool withdraw authority
-    /// 3. `[]` Pool token mint account
-    /// 4. `[s, w]` Payer for creation of token metadata account
-    /// 5. `[w]` Token metadata account
-    /// 6. `[]` Metadata program id
-    /// 7. `[]` System program id
-    /// 8. `[]` Rent sysvar
+    ///   Create token metadata for the stake-pool token in the metaplex-token program.
+    ///   This permissionless instruction is called as part of pool initialization.
+    ///
+    ///   0. `[]` Pool authority
+    ///   1. `[]` Pool token mint
+    ///   2. `[s, w]` Payer for creation of token metadata account
+    ///   3. `[w]` Token metadata account
+    ///   4. `[]` Metadata program id
+    ///   5. `[]` System program id
+    ///   6. `[]` Rent sysvar
     CreateTokenMetadata {
-        /// Token name
-        name: String,
-        /// Token symbol e.g. stkSOL
-        symbol: String,
-        /// URI of the uploaded metadata of the spl-token
-        uri: String,
+        /// Validator vote account address
+        vote_account_address: Pubkey,
     },
+
+    // TODO
     /// Update token metadata for the stake-pool token in the
     /// metaplex-token program
     ///
@@ -108,8 +103,8 @@ pub enum StakePoolInstruction {
     },
 }
 
-/// Creates an `Initialize` instruction.
-pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Instruction {
+/// Creates an `Initialize` instruction, plus helper instruction(s).
+pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Vec<Instruction> {
     let data = StakePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
@@ -135,15 +130,18 @@ pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) ->
         AccountMeta::new_readonly(stake::program::id(), false),
     ];
 
-    Instruction {
-        program_id: *program_id,
-        accounts,
-        data,
-    }
+    vec![
+        Instruction {
+            program_id: *program_id,
+            accounts,
+            data,
+        },
+        create_token_metadata(program_id, vote_account, payer),
+    ]
 }
 
 // TODO wrapper function that replaces the last 3 params with just wallet, calls this with atat/wallet/wallet?
-/// Creates a `DepositStake` instruction.
+/// Creates a `DepositStake` instruction, plus helper instruction(s).
 pub fn deposit_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
@@ -203,7 +201,7 @@ pub fn deposit_stake(
 
 // TODO wrapper which creates the system account ala create_blank_stake_account?
 // ergonomics are tricky because it needs to get the rent amount from somewhere
-/// Creates a `WithdrawStake` instruction.
+/// Creates a `WithdrawStake` instruction, plus helper instruction(s).
 pub fn withdraw_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
@@ -260,6 +258,38 @@ pub fn withdraw_stake(
 // TODO maybe have a helper function here that stakes for the user?
 // eg, creates instructions like create_independent_stake_account and delegate_stake_account
 
+/// Creates a `CreateTokenMetadata` instruction.
+pub fn create_token_metadata(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    payer: &Pubkey,
+) -> Instruction {
+    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
+    let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let (token_metadata, _) = find_metadata_account(&pool_mint);
+    let data = StakePoolInstruction::CreateTokenMetadata {
+        vote_account_address: *vote_account,
+    }
+    .try_to_vec()
+    .unwrap();
+
+    let accounts = vec![
+        AccountMeta::new_readonly(pool_authority, false),
+        AccountMeta::new_readonly(pool_mint, false),
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(token_metadata, false),
+        AccountMeta::new_readonly(mpl_token_metadata::id(), false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(sysvar::rent::id(), false),
+    ];
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
+}
+
 /// FIXME unchanged from original
 pub fn update_token_metadata(
     program_id: &Pubkey,
@@ -285,41 +315,6 @@ pub fn update_token_metadata(
         program_id: *program_id,
         accounts,
         data: StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
-            .try_to_vec()
-            .unwrap(),
-    }
-}
-
-/// FIXME unchanged from original
-pub fn create_token_metadata(
-    program_id: &Pubkey,
-    stake_pool: &Pubkey,
-    manager: &Pubkey,
-    pool_mint: &Pubkey,
-    payer: &Pubkey,
-    name: String,
-    symbol: String,
-    uri: String,
-) -> Instruction {
-    let (stake_pool_withdraw_authority, _) = (Pubkey::default(), ()); //FIXME find_withdraw_authority_program_address(program_id, stake_pool);
-    let (token_metadata, _) = find_metadata_account(pool_mint);
-
-    let accounts = vec![
-        AccountMeta::new_readonly(*stake_pool, false),
-        AccountMeta::new_readonly(*manager, true),
-        AccountMeta::new_readonly(stake_pool_withdraw_authority, false),
-        AccountMeta::new_readonly(*pool_mint, false),
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(token_metadata, false),
-        AccountMeta::new_readonly(mpl_token_metadata::id(), false),
-        AccountMeta::new_readonly(system_program::id(), false),
-        AccountMeta::new_readonly(sysvar::rent::id(), false),
-    ];
-
-    Instruction {
-        program_id: *program_id,
-        accounts,
-        data: StakePoolInstruction::CreateTokenMetadata { name, symbol, uri }
             .try_to_vec()
             .unwrap(),
     }

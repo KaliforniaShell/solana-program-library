@@ -66,9 +66,9 @@ impl SinglePoolAccounts {
         )
         .await;
 
-        let instruction =
+        let instructions =
             instruction::initialize(&id(), &self.vote_account.pubkey(), &payer.pubkey());
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let message = Message::new(&instructions, Some(&payer.pubkey()));
         let transaction = Transaction::new(&[payer], message, *recent_blockhash);
 
         banks_client

@@ -832,20 +832,16 @@ impl Processor {
         Ok(())
     }
 
-    // XXX FIXME actually now that i think about it, this can go away
-    // set our sensible default in the initialize instruction
+    // this is an optional, but typical, part of initialization
+    // we separate it from the initialize instruction so that upstream cannot break us
     #[inline(never)]
     fn process_create_pool_token_metadata(
-        _program_id: &Pubkey,
+        program_id: &Pubkey,
         accounts: &[AccountInfo],
-        name: String,
-        symbol: String,
-        uri: String,
+        vote_account_address: &Pubkey,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let stake_pool_info = next_account_info(account_info_iter)?;
-        let _manager_info = next_account_info(account_info_iter)?;
-        let withdraw_authority_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let payer_info = next_account_info(account_info_iter)?;
         let metadata_info = next_account_info(account_info_iter)?;
@@ -853,50 +849,44 @@ impl Processor {
         let system_program_info = next_account_info(account_info_iter)?;
         let rent_sysvar_info = next_account_info(account_info_iter)?;
 
+        let bump_seed = check_pool_authority_address(
+            program_id,
+            vote_account_address,
+            pool_authority_info.key,
+        )?;
+        check_pool_mint_address(program_id, vote_account_address, pool_mint_info.key)?;
+        check_system_program(system_program_info.key)?;
+        check_rent_sysvar(rent_sysvar_info.key)?;
+        check_account_owner(payer_info, &system_program::id())?;
+        check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
+        check_mpl_metadata_account_address(metadata_info.key, pool_mint_info.key)?;
+
         if !payer_info.is_signer {
             msg!("Payer did not sign metadata creation");
             return Err(StakePoolError::SignatureMissing.into());
         }
 
-        check_system_program(system_program_info.key)?;
-        check_rent_sysvar(rent_sysvar_info.key)?;
-        check_account_owner(payer_info, &system_program::id())?;
-        check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
-
-        /* XXX HANA commenting out pool/manager validation because i want to delete the stakepool struct
-         * the way this would work is we have a sensible default for each token that says what it is
-         * and probably allow the owner of the validator to give it a more colorful description
-
-        check_account_owner(stake_pool_info, program_id)?;
-        let stake_pool = try_from_slice_unchecked::<StakePool>(&stake_pool_info.data.borrow())?;
-        if !stake_pool.is_valid() {
-            return Err(StakePoolError::InvalidState.into());
+        // checking the mint exists confirms pool is initialized
+        // TODO put this in a utility function? do something smarter/simpler?
+        {
+            let pool_mint_data = pool_mint_info.try_borrow_data()?;
+            let _ = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
         }
-
-        stake_pool.check_manager(manager_info)?;
-        stake_pool.check_authority_withdraw(
-            withdraw_authority_info.key,
-            program_id,
-            stake_pool_info.key,
-        )?;
-        stake_pool.check_mint(pool_mint_info)?;
-        */
-
-        check_mpl_metadata_account_address(metadata_info.key, pool_mint_info.key)?;
-
-        // Token mint authority for stake-pool token is stake-pool withdraw authority
-        let token_mint_authority = withdraw_authority_info;
 
         let new_metadata_instruction = create_metadata_accounts_v3(
             *mpl_token_metadata_program_info.key,
             *metadata_info.key,
             *pool_mint_info.key,
-            *token_mint_authority.key,
+            *pool_authority_info.key,
             *payer_info.key,
-            *token_mint_authority.key,
-            name,
-            symbol,
-            uri,
+            *pool_authority_info.key,
+            // XXX TODO FIXME figure out good defaults
+            // symbol and uri maybe are supposed to be ""? i dunno whats ideomatic
+            // name im leaning toward "SPL Single-Pool Token (1234...abcd)"
+            // where the parens surround an abbreviation of the vote account address
+            "SOMETHING EXCITING TO DEBATE".to_string(),
+            "".to_string(),
+            "".to_string(),
             None,
             0,
             true,
@@ -906,27 +896,26 @@ impl Processor {
             None,
         );
 
-        let (_, stake_withdraw_bump_seed) = ((), 0); //FIXME crate::find_withdraw_authority_program_address(program_id, stake_pool_info.key);
-
-        let token_mint_authority_signer_seeds: &[&[_]] = &[
-            &stake_pool_info.key.to_bytes()[..32],
-            &[], //FIXME AUTHORITY_WITHDRAW,
-            &[stake_withdraw_bump_seed],
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            vote_account_address.as_ref(),
+            &[bump_seed],
         ];
+        let signers = &[&authority_seeds[..]];
 
         invoke_signed(
             &new_metadata_instruction,
             &[
                 metadata_info.clone(),
                 pool_mint_info.clone(),
-                withdraw_authority_info.clone(),
+                pool_authority_info.clone(),
                 payer_info.clone(),
-                withdraw_authority_info.clone(),
+                pool_authority_info.clone(),
                 system_program_info.clone(),
                 rent_sysvar_info.clone(),
                 mpl_token_metadata_program_info.clone(),
             ],
-            &[token_mint_authority_signer_seeds],
+            signers,
         )?;
 
         Ok(())
@@ -1012,14 +1001,6 @@ impl Processor {
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
         let instruction = StakePoolInstruction::try_from_slice(input)?;
         match instruction {
-            StakePoolInstruction::CreateTokenMetadata { name, symbol, uri } => {
-                msg!("Instruction: CreateTokenMetadata");
-                Self::process_create_pool_token_metadata(program_id, accounts, name, symbol, uri)
-            }
-            StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri } => {
-                msg!("Instruction: UpdateTokenMetadata");
-                Self::process_update_pool_token_metadata(program_id, accounts, name, symbol, uri)
-            }
             StakePoolInstruction::Initialize => {
                 msg!("Instruction: Initialize");
                 Self::process_initialize(program_id, accounts)
@@ -1043,6 +1024,20 @@ impl Processor {
                     &user_stake_authority,
                     token_amount,
                 )
+            }
+            StakePoolInstruction::CreateTokenMetadata {
+                vote_account_address,
+            } => {
+                msg!("Instruction: CreateTokenMetadata");
+                Self::process_create_pool_token_metadata(
+                    program_id,
+                    accounts,
+                    &vote_account_address,
+                )
+            }
+            StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri } => {
+                msg!("Instruction: UpdateTokenMetadata");
+                Self::process_update_pool_token_metadata(program_id, accounts, name, symbol, uri)
             }
         }
     }
