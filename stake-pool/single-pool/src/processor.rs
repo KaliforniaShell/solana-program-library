@@ -25,7 +25,7 @@ use {
         rent::Rent,
         stake, system_instruction, system_program,
         sysvar::Sysvar,
-        vote::state::VoteState,
+        //vote::state::vote_state_versions::VoteStateVersions,
     },
     spl_token_2022::{extension::StateWithExtensions, state::Mint},
 };
@@ -945,7 +945,40 @@ impl Processor {
         let vote_account_info = next_account_info(account_info_iter)?;
 
     // XXX WRONG
-    let vote_state = vote_account_info.try_borrow_data().and_then(VoteState::deserialize)?;
+    //let vote_state = vote_account_info.try_borrow_data().and_then(VoteState::deserialize)?;
+    // XXX RIGHT????
+    //let vote_state: VoteStateVersions = vote_account_info.state().unwrap();
+    //let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
+
+    // XXX ok argh think think. this is how the cli does it: 
+    //     let vote_state: VoteStateVersions = vote_account.state().unwrap();
+    //     let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
+    // state() comes from State which is a convenience for converting bincode errors to instruction errors
+    // and is impled for Account which is a struct (not the same-named trait) returned by rpc et al
+    // this is an *inferior* type to AccountInfo. but downcasting to Account doesnt appear to be a thing
+    // but... im slavishly following existing code because idk if the version byte will be on the data...?
+    // state() is literally just deserialize_data().map_err(). i think i can just deserialize normally?
+    // deserialize_data() is a transparent wrapper on bincode::deserialize()
+    // and VoteStateVersions derives Deserialize. so i thiiiink i can just call deserialize on the data?
+    // im not seeing how this actually works tho. where does it handle the leading byte
+    // oh well. the code paths ive read simply would not work unless it was baked into the types
+
+    // FIXME custom error here
+    // XXX ask jon to look at this, i feel like there has to be an sdk trait that wraps deserialie or something
+    //let vote_data = vote_account_info.try_borrow_data()?;
+    //let vote_state: VoteStateVersions = bincode::deserialize(&vote_data).unwrap();
+    //let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
+
+    // XXX TODO FIXME ok i am officially out of my depth
+    //Error: Function _ZN14solana_program4vote5state9VoteState11deserialize17he97c00397d39ebd1E Stack offset of 6344 exceeded max offset of 4096 by 2248 bytes, please minimize large stack variables
+    //Error: Function _ZN229_$LT$solana_program..vote..state..vote_state_0_23_5.._..$LT$impl$u20$serde..de..Deserialize$u20$for$u20$solana_program..vote..state..vote_state_0_23_5..VoteState0_23_5$GT$..deserialize..__Visitor$u20$as$u20$serde..de..Visitor$GT$9visit_seq17hffe462f16e947850E Stack offset of 5752 exceeded max offset of 4096 by 1656 bytes, please minimize large stack variables
+    // i get this from build-sbf. tried boxing the results of the above, no luck
+    // then i *commented out the code and the import* and *still* got these errors from build-sbf
+    // is this coming from the monorepo?? wtf is going on. gonna try to upgrade in a new branch and see what happens ig...
+    // uhhhhhHHHHHHH i get the same errors when building multi-stake????
+    // ok. whatever. new branch for the 1.15 update, cargo clean, see what happens then
+
+    
 
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
 
