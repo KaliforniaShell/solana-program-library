@@ -65,6 +65,7 @@ async fn success(env: Env) {
     let mut context = setup(&env).await;
 
     // FIXME jon is right, a trait would be better
+    // TODO import as mpool so we do mpool::instruction
     let pool_mint = match env {
         Env::MultiPool(ref stake_pool_accounts) => {
             let ix = instruction::create_token_metadata(
@@ -99,11 +100,11 @@ async fn success(env: Env) {
     // single-pool metadata requires no setup by default
 
     let metadata = get_metadata_account(&mut context.banks_client, &pool_mint).await;
-
     assert_metadata(&env, &metadata);
 }
 
 // TODO for single, test that init works without create, test create still works after
+// also make sure create twice fails!!
 
 /*
 #[tokio::test]

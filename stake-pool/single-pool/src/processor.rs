@@ -25,6 +25,7 @@ use {
         rent::Rent,
         stake, system_instruction, system_program,
         sysvar::Sysvar,
+        vote::state::VoteState,
     },
     spl_token_2022::{extension::StateWithExtensions, state::Mint},
 };
@@ -921,6 +922,11 @@ impl Processor {
         Ok(())
     }
 
+    // XXX NEXT UP this shit
+    // take authorized_withdrawer as a signer. take the vote account and get authorized_withdrawer off it
+    // check that it matches. if so we change shit to whatever the person wants
+    // and we use pool authority as the authority on mpl, we only handle this signature internally
+    // i asked edgar if this flow is reasonable or not, maybe they cold wallet the withdrawer?
     #[inline(never)]
     fn process_update_pool_token_metadata(
         _program_id: &Pubkey,
@@ -936,6 +942,10 @@ impl Processor {
         let withdraw_authority_info = next_account_info(account_info_iter)?;
         let metadata_info = next_account_info(account_info_iter)?;
         let mpl_token_metadata_program_info = next_account_info(account_info_iter)?;
+        let vote_account_info = next_account_info(account_info_iter)?;
+
+    // XXX WRONG
+    let vote_state = vote_account_info.try_borrow_data().and_then(VoteState::deserialize)?;
 
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
 

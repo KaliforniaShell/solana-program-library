@@ -69,3 +69,5 @@ async fn success(env: Env) {
         }
     }
 }
+
+// TODO port over the fails... some are multi-only but def want to make sure double init fails

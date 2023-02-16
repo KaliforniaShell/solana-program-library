@@ -85,6 +85,8 @@ pub enum StakePoolInstruction {
     },
 
     // TODO
+    // XXX i think my list looks like...
+    // pool auth, vote account, withdrawer, metadata, metaplex
     /// Update token metadata for the stake-pool token in the
     /// metaplex-token program
     ///
