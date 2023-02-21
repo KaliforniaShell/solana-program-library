@@ -25,7 +25,7 @@ use {
         rent::Rent,
         stake, system_instruction, system_program,
         sysvar::Sysvar,
-        //vote::state::vote_state_versions::VoteStateVersions,
+        vote::program as vote_program,
     },
     spl_token_2022::{extension::StateWithExtensions, state::Mint},
 };
@@ -927,84 +927,50 @@ impl Processor {
     // check that it matches. if so we change shit to whatever the person wants
     // and we use pool authority as the authority on mpl, we only handle this signature internally
     // i asked edgar if this flow is reasonable or not, maybe they cold wallet the withdrawer?
+
+    // XXX TODO alright game plan impl this without the check
+    // then do the check by just pulling from the buffer
+    // * legacy: 00 00 00 00 then: 32 + 32 + 8 + (32 + 8 * 3) * 32 = 1864 byte offset not including enum
+    //   this is just in theory tho, i need to test it (assuming these still exist?)
+    //   i still dont understand how the legacy verison would have the enum u32 in the acocunt data
+    // * modren: 01 00 00 00 and key immediately follows. this is tested
     #[inline(never)]
     fn process_update_pool_token_metadata(
-        _program_id: &Pubkey,
+        program_id: &Pubkey,
         accounts: &[AccountInfo],
         name: String,
         symbol: String,
         uri: String,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-
-        let stake_pool_info = next_account_info(account_info_iter)?;
-        let _manager_info = next_account_info(account_info_iter)?;
-        let withdraw_authority_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
+        let vote_account_info = next_account_info(account_info_iter)?;
+        let authorized_withdrawer_info = next_account_info(account_info_iter)?;
         let metadata_info = next_account_info(account_info_iter)?;
         let mpl_token_metadata_program_info = next_account_info(account_info_iter)?;
-        let vote_account_info = next_account_info(account_info_iter)?;
 
-    // XXX WRONG
-    //let vote_state = vote_account_info.try_borrow_data().and_then(VoteState::deserialize)?;
-    // XXX RIGHT????
-    //let vote_state: VoteStateVersions = vote_account_info.state().unwrap();
-    //let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
-
-    // XXX ok argh think think. this is how the cli does it: 
-    //     let vote_state: VoteStateVersions = vote_account.state().unwrap();
-    //     let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
-    // state() comes from State which is a convenience for converting bincode errors to instruction errors
-    // and is impled for Account which is a struct (not the same-named trait) returned by rpc et al
-    // this is an *inferior* type to AccountInfo. but downcasting to Account doesnt appear to be a thing
-    // but... im slavishly following existing code because idk if the version byte will be on the data...?
-    // state() is literally just deserialize_data().map_err(). i think i can just deserialize normally?
-    // deserialize_data() is a transparent wrapper on bincode::deserialize()
-    // and VoteStateVersions derives Deserialize. so i thiiiink i can just call deserialize on the data?
-    // im not seeing how this actually works tho. where does it handle the leading byte
-    // oh well. the code paths ive read simply would not work unless it was baked into the types
-
-    // FIXME custom error here
-    // XXX ask jon to look at this, i feel like there has to be an sdk trait that wraps deserialie or something
-    //let vote_data = vote_account_info.try_borrow_data()?;
-    //let vote_state: VoteStateVersions = bincode::deserialize(&vote_data).unwrap();
-    //let authorized_withdrawer = vote_state.convert_to_current().authorized_withdrawer;
-
-    // XXX TODO FIXME ok i am officially out of my depth
-    //Error: Function _ZN14solana_program4vote5state9VoteState11deserialize17he97c00397d39ebd1E Stack offset of 6344 exceeded max offset of 4096 by 2248 bytes, please minimize large stack variables
-    //Error: Function _ZN229_$LT$solana_program..vote..state..vote_state_0_23_5.._..$LT$impl$u20$serde..de..Deserialize$u20$for$u20$solana_program..vote..state..vote_state_0_23_5..VoteState0_23_5$GT$..deserialize..__Visitor$u20$as$u20$serde..de..Visitor$GT$9visit_seq17hffe462f16e947850E Stack offset of 5752 exceeded max offset of 4096 by 1656 bytes, please minimize large stack variables
-    // i get this from build-sbf. tried boxing the results of the above, no luck
-    // then i *commented out the code and the import* and *still* got these errors from build-sbf
-    // is this coming from the monorepo?? wtf is going on. gonna try to upgrade in a new branch and see what happens ig...
-    // uhhhhhHHHHHHH i get the same errors when building multi-stake????
-    // ok. whatever. new branch for the 1.15 update, cargo clean, see what happens then
-
-    
-
-        check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
-
-        /* XXX HANA as noted in create metadata
-        check_account_owner(stake_pool_info, program_id)?;
-        let stake_pool = try_from_slice_unchecked::<StakePool>(&stake_pool_info.data.borrow())?;
-        if !stake_pool.is_valid() {
-            return Err(StakePoolError::InvalidState.into());
-        }
-
-        stake_pool.check_manager(manager_info)?;
-        stake_pool.check_authority_withdraw(
-            withdraw_authority_info.key,
+        let bump_seed = check_pool_authority_address(
             program_id,
-            stake_pool_info.key,
+            vote_account_info.key,
+            pool_authority_info.key,
         )?;
-        check_mpl_metadata_account_address(metadata_info.key, &stake_pool.pool_mint)?;
-        */
+        let (pool_mint_address, _) =
+            crate::find_pool_mint_address(program_id, vote_account_info.key);
+        check_account_owner(vote_account_info, &vote_program::id())?;
+        check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
+        check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
-        // Token mint authority for stake-pool token is withdraw authority only
-        let token_mint_authority = withdraw_authority_info;
+        // TODO FIXME check withdrawer as stated
+
+        if !authorized_withdrawer_info.is_signer {
+            msg!("Vote account authorized withdrawer did not sign metadata update");
+            return Err(StakePoolError::SignatureMissing.into());
+        }
 
         let update_metadata_accounts_instruction = update_metadata_accounts_v2(
             *mpl_token_metadata_program_info.key,
             *metadata_info.key,
-            *token_mint_authority.key,
+            *pool_authority_info.key,
             None,
             Some(DataV2 {
                 name,
@@ -1019,22 +985,21 @@ impl Processor {
             Some(true),
         );
 
-        let (_, stake_withdraw_bump_seed) = ((), 0); //FIXME crate::find_withdraw_authority_program_address(program_id, stake_pool_info.key);
-
-        let token_mint_authority_signer_seeds: &[&[_]] = &[
-            &stake_pool_info.key.to_bytes()[..32],
-            &[], //FIXME AUTHORITY_WITHDRAW,
-            &[stake_withdraw_bump_seed],
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            vote_account_info.key.as_ref(),
+            &[bump_seed],
         ];
+        let signers = &[&authority_seeds[..]];
 
         invoke_signed(
             &update_metadata_accounts_instruction,
             &[
                 metadata_info.clone(),
-                withdraw_authority_info.clone(),
+                pool_authority_info.clone(),
                 mpl_token_metadata_program_info.clone(),
             ],
-            &[token_mint_authority_signer_seeds],
+            signers,
         )?;
 
         Ok(())

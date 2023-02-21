@@ -84,17 +84,13 @@ pub enum StakePoolInstruction {
         vote_account_address: Pubkey,
     },
 
-    // TODO
-    // XXX i think my list looks like...
-    // pool auth, vote account, withdrawer, metadata, metaplex
-    /// Update token metadata for the stake-pool token in the
-    /// metaplex-token program
+    ///   Update token metadata for the stake-pool token in the metaplex-token program.
     ///
-    /// 0. `[]` Stake pool
-    /// 1. `[s]` Manager
-    /// 2. `[]` Stake pool withdraw authority
-    /// 3. `[w]` Token metadata account
-    /// 4. `[]` Metadata program id
+    ///   0. `[]` Pool authority
+    ///   1. `[]` Validator vote account
+    ///   2. `[s]` Vote account authorized withdrawer
+    ///   3. `[w]` Token metadata account
+    ///   4. `[]` Metadata program id
     UpdateTokenMetadata {
         /// Token name
         name: String,
@@ -292,23 +288,26 @@ pub fn create_token_metadata(
     }
 }
 
-/// FIXME unchanged from original
+/// Creates an `UpdateTokenMetadata` instruction.
 pub fn update_token_metadata(
     program_id: &Pubkey,
-    stake_pool: &Pubkey,
-    manager: &Pubkey,
-    pool_mint: &Pubkey,
+    vote_account: &Pubkey,
+    authorized_withdrawer: &Pubkey,
     name: String,
     symbol: String,
     uri: String,
 ) -> Instruction {
-    let (stake_pool_withdraw_authority, _) = (Pubkey::default(), ()); //FIXME find_withdraw_authority_program_address(program_id, stake_pool);
-    let (token_metadata, _) = find_metadata_account(pool_mint);
+    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
+    let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let (token_metadata, _) = find_metadata_account(&pool_mint);
+    let data = StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
+        .try_to_vec()
+        .unwrap();
 
     let accounts = vec![
-        AccountMeta::new_readonly(*stake_pool, false),
-        AccountMeta::new_readonly(*manager, true),
-        AccountMeta::new_readonly(stake_pool_withdraw_authority, false),
+        AccountMeta::new_readonly(pool_authority, false),
+        AccountMeta::new_readonly(*vote_account, false),
+        AccountMeta::new(*authorized_withdrawer, true),
         AccountMeta::new(token_metadata, false),
         AccountMeta::new_readonly(mpl_token_metadata::id(), false),
     ];
@@ -316,8 +315,6 @@ pub fn update_token_metadata(
     Instruction {
         program_id: *program_id,
         accounts,
-        data: StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
-            .try_to_vec()
-            .unwrap(),
+        data,
     }
 }
