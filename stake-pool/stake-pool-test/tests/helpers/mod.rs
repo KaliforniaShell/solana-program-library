@@ -221,6 +221,7 @@ pub async fn create_vote(
         &VoteInit {
             node_pubkey: validator.pubkey(),
             authorized_voter: validator.pubkey(),
+            authorized_withdrawer: validator.pubkey(),
             ..VoteInit::default()
         },
         rent_voter,
@@ -233,20 +234,6 @@ pub async fn create_vote(
         *recent_blockhash,
     );
     banks_client.process_transaction(transaction).await.unwrap();
-
-    /* XXX HANA
-    let account = get_account(banks_client, &vote.pubkey()).await;
-    println!("HANA vote data: {:?}", account.data);
-
-    let st1 = VoteState::default();
-    let mut st = VoteStateVersions::Current(Box::new(st1));
-    println!("HANA vote def1: {:?}", bincode::serialize(&st));
-    if let VoteStateVersions::Current(ref mut x) = st {
-        x.node_pubkey = Pubkey::new(&[69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69, 69]);
-    }
-
-    println!("HANA vote def2: {:?}", bincode::serialize(&st));
-    */
 }
 
 pub async fn create_independent_stake_account(

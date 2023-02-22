@@ -86,8 +86,8 @@ pub enum StakePoolInstruction {
 
     ///   Update token metadata for the stake-pool token in the metaplex-token program.
     ///
-    ///   0. `[]` Pool authority
-    ///   1. `[]` Validator vote account
+    ///   0. `[]` Validator vote account
+    ///   1. `[]` Pool authority
     ///   2. `[s]` Vote account authorized withdrawer
     ///   3. `[w]` Token metadata account
     ///   4. `[]` Metadata program id
@@ -305,9 +305,9 @@ pub fn update_token_metadata(
         .unwrap();
 
     let accounts = vec![
-        AccountMeta::new_readonly(pool_authority, false),
         AccountMeta::new_readonly(*vote_account, false),
-        AccountMeta::new(*authorized_withdrawer, true),
+        AccountMeta::new_readonly(pool_authority, false),
+        AccountMeta::new_readonly(*authorized_withdrawer, true),
         AccountMeta::new(token_metadata, false),
         AccountMeta::new_readonly(mpl_token_metadata::id(), false),
     ];

@@ -922,18 +922,6 @@ impl Processor {
         Ok(())
     }
 
-    // XXX NEXT UP this shit
-    // take authorized_withdrawer as a signer. take the vote account and get authorized_withdrawer off it
-    // check that it matches. if so we change shit to whatever the person wants
-    // and we use pool authority as the authority on mpl, we only handle this signature internally
-    // i asked edgar if this flow is reasonable or not, maybe they cold wallet the withdrawer?
-
-    // XXX TODO alright game plan impl this without the check
-    // then do the check by just pulling from the buffer
-    // * legacy: 00 00 00 00 then: 32 + 32 + 8 + (32 + 8 * 3) * 32 = 1864 byte offset not including enum
-    //   this is just in theory tho, i need to test it (assuming these still exist?)
-    //   i still dont understand how the legacy verison would have the enum u32 in the acocunt data
-    // * modren: 01 00 00 00 and key immediately follows. this is tested
     #[inline(never)]
     fn process_update_pool_token_metadata(
         program_id: &Pubkey,
@@ -943,12 +931,13 @@ impl Processor {
         uri: String,
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let pool_authority_info = next_account_info(account_info_iter)?;
         let vote_account_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
         let authorized_withdrawer_info = next_account_info(account_info_iter)?;
         let metadata_info = next_account_info(account_info_iter)?;
         let mpl_token_metadata_program_info = next_account_info(account_info_iter)?;
 
+        check_account_owner(vote_account_info, &vote_program::id())?;
         let bump_seed = check_pool_authority_address(
             program_id,
             vote_account_info.key,
@@ -956,11 +945,30 @@ impl Processor {
         )?;
         let (pool_mint_address, _) =
             crate::find_pool_mint_address(program_id, vote_account_info.key);
-        check_account_owner(vote_account_info, &vote_program::id())?;
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
-        // TODO FIXME check withdrawer as stated
+        // XXX this is still incomplete
+        // * legacy: 00 00 00 00 then: 32 + 32 + 8 + (32 + 8 * 3) * 32 = 1864 byte offset not including enum
+        //   this is just in theory tho, i need to test it (assuming these still exist?)
+        //   i still dont understand how the legacy verison would have the enum u32 in the account data
+        // * modren: 01 00 00 00 and key immediately follows. this is tested
+        // TODO replace range access with something the auditors wont complain about
+        // XXX can vote program own other types of accounts? do i need to do further validation?
+        let vote_account_data = &vote_account_info.try_borrow_data()?;
+        let state_variant = vote_account_data[0..4]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidArgument)?;
+
+        match u32::from_le_bytes(state_variant) {
+            0 => unimplemented!(),
+            1 => {
+                if *authorized_withdrawer_info.key != Pubkey::new(&vote_account_data[4..36]) {
+                    panic!("error here, bad authority");
+                }
+            }
+            _ => panic!("error here, invalid variant"),
+        }
 
         if !authorized_withdrawer_info.is_signer {
             msg!("Vote account authorized withdrawer did not sign metadata update");
