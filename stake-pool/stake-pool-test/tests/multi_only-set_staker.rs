@@ -23,14 +23,18 @@ use {
 };
 
 async fn setup(env: &Env) -> (BanksClient, Keypair, Hash, Keypair) {
-    let (mut banks_client, payer, recent_blockhash) = env.program_test().start().await;
-    env.initialize(&mut banks_client, &payer, &recent_blockhash)
-        .await
-        .unwrap();
+    //let (mut banks_client, payer, recent_blockhash) = env.program_test().start().await;
+    let mut context = env.program_test().start_with_context().await;
+    env.initialize(&mut context).await.unwrap();
 
     let new_staker = Keypair::new();
 
-    (banks_client, payer, recent_blockhash, new_staker)
+    (
+        context.banks_client,
+        context.payer,
+        context.last_blockhash,
+        new_staker,
+    )
 }
 
 #[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]

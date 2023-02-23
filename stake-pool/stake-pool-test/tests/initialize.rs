@@ -37,31 +37,31 @@ use {
 #[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")]
 #[tokio::test]
 async fn success(env: Env) {
-    let (mut banks_client, payer, recent_blockhash) = env.program_test().start().await;
+    let mut context = env.program_test().start_with_context().await;
 
-    env.initialize(&mut banks_client, &payer, &recent_blockhash)
-        .await
-        .unwrap();
+    env.initialize(&mut context).await.unwrap();
 
     match env {
         Env::SinglePool(accounts) => {
             // mint exists
-            let mint_account = get_account(&mut banks_client, &accounts.mint).await;
+            let mint_account = get_account(&mut context.banks_client, &accounts.mint).await;
             StateWithExtensionsOwned::<Mint>::unpack(mint_account.data).unwrap();
 
             // stake account exists
-            let stake_account = get_account(&mut banks_client, &accounts.stake_account).await;
+            let stake_account =
+                get_account(&mut context.banks_client, &accounts.stake_account).await;
             assert_eq!(stake_account.owner, stake::program::id());
         }
         Env::MultiPool(accounts) => {
             // Stake pool now exists
-            let stake_pool = get_account(&mut banks_client, &accounts.stake_pool.pubkey()).await;
+            let stake_pool =
+                get_account(&mut context.banks_client, &accounts.stake_pool.pubkey()).await;
             assert_eq!(stake_pool.data.len(), get_packed_len::<state::StakePool>());
             assert_eq!(stake_pool.owner, id());
 
             // Validator stake list storage initialized
             let validator_list =
-                get_account(&mut banks_client, &accounts.validator_list.pubkey()).await;
+                get_account(&mut context.banks_client, &accounts.validator_list.pubkey()).await;
             let validator_list =
                 try_from_slice_unchecked::<state::ValidatorList>(validator_list.data.as_slice())
                     .unwrap();

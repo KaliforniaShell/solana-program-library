@@ -41,6 +41,10 @@ use {
 
 pub mod multi_pool;
 pub mod single_pool;
+
+pub mod vote_legacy;
+pub use vote_legacy::*;
+
 pub mod token;
 pub use token::*;
 
@@ -65,6 +69,7 @@ pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EnvBuilder {
     SinglePool,
+    SinglePoolLegacy,
     MultiPool,
     MultiPoolToken22,
 }
@@ -72,10 +77,16 @@ impl EnvBuilder {
     pub fn env(self) -> Env {
         match self {
             EnvBuilder::SinglePool => Env::SinglePool(SinglePoolAccounts::default()),
-            _ => Env::MultiPool(MultiPoolAccounts {
-                token_program_id: self.token_program_id(),
-                ..Default::default()
+            EnvBuilder::SinglePoolLegacy => Env::SinglePool(SinglePoolAccounts {
+                legacy_vote: true,
+                ..SinglePoolAccounts::default()
             }),
+            EnvBuilder::MultiPool | EnvBuilder::MultiPoolToken22 => {
+                Env::MultiPool(MultiPoolAccounts {
+                    token_program_id: self.token_program_id(),
+                    ..Default::default()
+                })
+            }
         }
     }
 
@@ -155,21 +166,16 @@ impl Env {
         }
     }
 
-    pub async fn initialize(
-        &self,
-        banks_client: &mut BanksClient,
-        payer: &Keypair,
-        recent_blockhash: &Hash,
-    ) -> Result<(), TransportError> {
+    pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
         match self {
-            Env::SinglePool(accounts) => {
-                accounts
-                    .initialize(banks_client, payer, recent_blockhash)
-                    .await
-            }
+            Env::SinglePool(accounts) => accounts.initialize(context).await,
             Env::MultiPool(accounts) => {
                 accounts
-                    .initialize(banks_client, payer, recent_blockhash)
+                    .initialize(
+                        &mut context.banks_client,
+                        &context.payer,
+                        &context.last_blockhash,
+                    )
                     .await
             }
         }
@@ -198,25 +204,19 @@ pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> Sol
         .expect("account not found")
 }
 
-pub async fn create_vote(
-    banks_client: &mut BanksClient,
-    payer: &Keypair,
-    recent_blockhash: &Hash,
-    validator: &Keypair,
-    vote: &Keypair,
-) {
-    let rent = banks_client.get_rent().await.unwrap();
+pub async fn create_vote(context: &mut ProgramTestContext, validator: &Keypair, vote: &Keypair) {
+    let rent = context.banks_client.get_rent().await.unwrap();
     let rent_voter = rent.minimum_balance(VoteState::size_of());
 
     let mut instructions = vec![system_instruction::create_account(
-        &payer.pubkey(),
+        &context.payer.pubkey(),
         &validator.pubkey(),
         rent.minimum_balance(0),
         0,
         &system_program::id(),
     )];
     instructions.append(&mut vote_instruction::create_account(
-        &payer.pubkey(),
+        &context.payer.pubkey(),
         &vote.pubkey(),
         &VoteInit {
             node_pubkey: validator.pubkey(),
@@ -229,11 +229,15 @@ pub async fn create_vote(
 
     let transaction = Transaction::new_signed_with_payer(
         &instructions,
-        Some(&payer.pubkey()),
-        &[validator, vote, payer],
-        *recent_blockhash,
+        Some(&context.payer.pubkey()),
+        &[validator, vote, &context.payer],
+        context.last_blockhash,
     );
-    banks_client.process_transaction(transaction).await.unwrap();
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
 }
 
 pub async fn create_independent_stake_account(

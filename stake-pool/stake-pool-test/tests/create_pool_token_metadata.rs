@@ -28,13 +28,7 @@ const MULTI_URI: &str = "test_uri";
 
 async fn setup(env: &Env) -> ProgramTestContext {
     let mut context = env.program_test().start_with_context().await;
-    env.initialize(
-        &mut context.banks_client,
-        &context.payer,
-        &context.last_blockhash,
-    )
-    .await
-    .unwrap();
+    env.initialize(&mut context).await.unwrap();
 
     context
 }

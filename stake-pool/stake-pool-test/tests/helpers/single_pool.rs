@@ -2,7 +2,7 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
-    crate::create_vote,
+    crate::{create_vote, create_vote_legacy},
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
@@ -49,29 +49,23 @@ pub struct SinglePoolAccounts {
     pub authority: Pubkey,
     pub mint: Pubkey,
     pub token_program_id: Pubkey,
+    pub legacy_vote: bool,
 }
 impl SinglePoolAccounts {
-    pub async fn initialize(
-        &self,
-        banks_client: &mut BanksClient,
-        payer: &Keypair,
-        recent_blockhash: &Hash,
-    ) -> Result<(), TransportError> {
-        create_vote(
-            banks_client,
-            payer,
-            recent_blockhash,
-            &self.validator,
-            &self.vote_account,
-        )
-        .await;
+    pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
+        if self.legacy_vote {
+            create_vote_legacy(context, &self.validator, &self.vote_account).await;
+        } else {
+            create_vote(context, &self.validator, &self.vote_account).await;
+        }
 
         let instructions =
-            instruction::initialize(&id(), &self.vote_account.pubkey(), &payer.pubkey());
-        let message = Message::new(&instructions, Some(&payer.pubkey()));
-        let transaction = Transaction::new(&[payer], message, *recent_blockhash);
+            instruction::initialize(&id(), &self.vote_account.pubkey(), &context.payer.pubkey());
+        let message = Message::new(&instructions, Some(&context.payer.pubkey()));
+        let transaction = Transaction::new(&[&context.payer], message, context.last_blockhash);
 
-        banks_client
+        context
+            .banks_client
             .process_transaction(transaction)
             .await
             .map_err(|e| e.into())
@@ -88,6 +82,7 @@ impl Default for SinglePoolAccounts {
             mint: find_pool_mint_address(&id(), &vote_account.pubkey()).0,
             vote_account,
             token_program_id: spl_token::id(),
+            legacy_vote: false,
         }
     }
 }
