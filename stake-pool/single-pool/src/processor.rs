@@ -2,8 +2,9 @@
 
 use {
     crate::{
-        error::StakePoolError, instruction::StakePoolInstruction, MINT_DECIMALS,
-        POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
+        error::StakePoolError, instruction::StakePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
+        MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
+        VOTE_STATE_OFFSET,
     },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
@@ -948,11 +949,6 @@ impl Processor {
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
-        // XXX this is still incomplete
-        // * legacy: 00 00 00 00 then: 32 + 32 + 8 + (32 + 8 * 3) * 32 = 1864 byte offset not including enum
-        //   this is just in theory tho, i need to test it (assuming these still exist?)
-        //   i still dont understand how the legacy verison would have the enum u32 in the account data
-        // * modren: 01 00 00 00 and key immediately follows. this is tested
         // TODO replace range access with something the auditors wont complain about
         // XXX can vote program own other types of accounts? do i need to do further validation?
         let vote_account_data = &vote_account_info.try_borrow_data()?;
@@ -961,9 +957,20 @@ impl Processor {
             .map_err(|_| ProgramError::InvalidArgument)?;
 
         match u32::from_le_bytes(state_variant) {
-            0 => unimplemented!(),
+            0 => {
+                if *authorized_withdrawer_info.key
+                    != Pubkey::new(
+                        &vote_account_data
+                            [LEGACY_VOTE_STATE_OFFSET..(LEGACY_VOTE_STATE_OFFSET + 32)],
+                    )
+                {
+                    panic!("error here, bad authority");
+                }
+            }
             1 => {
-                if *authorized_withdrawer_info.key != Pubkey::new(&vote_account_data[4..36]) {
+                if *authorized_withdrawer_info.key
+                    != Pubkey::new(&vote_account_data[VOTE_STATE_OFFSET..(VOTE_STATE_OFFSET + 32)])
+                {
                     panic!("error here, bad authority");
                 }
             }

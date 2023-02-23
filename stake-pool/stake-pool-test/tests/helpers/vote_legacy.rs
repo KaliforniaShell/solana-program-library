@@ -2,8 +2,6 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
-    crate::multi_pool::*,
-    crate::single_pool::*,
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     serde_derive::{Deserialize, Serialize},
@@ -19,7 +17,7 @@ use {
     },
     solana_program_test::{processor, BanksClient, ProgramTest, ProgramTestContext},
     solana_sdk::{
-        account::{Account as SolanaAccount, AccountSharedData, WritableAccount},
+        account::{Account, AccountSharedData, WritableAccount},
         clock::{Clock, Epoch},
         compute_budget::ComputeBudgetInstruction,
         feature_set::stake_raise_minimum_delegation_to_1_sol,
@@ -36,11 +34,8 @@ use {
         },
     },
     spl_associated_token_account as atoken, spl_stake_pool as mpool,
-    spl_stake_single_pool as spool,
-    spl_token_2022::{
-        extension::{ExtensionType, StateWithExtensionsOwned},
-        state::{Account, Mint},
-    },
+    spl_stake_single_pool::LEGACY_VOTE_STATE_OFFSET,
+    spl_token_2022::extension::{ExtensionType, StateWithExtensionsOwned},
     std::{collections::VecDeque, convert::TryInto, num::NonZeroU32},
 };
 
@@ -114,7 +109,7 @@ pub async fn create_vote_legacy(
     let vote_state = VoteStateVersions::V0_23_5(Box::new(vote_state));
     let buf = bincode::serialize(&vote_state).unwrap();
 
-    let account = SolanaAccount {
+    let account = Account {
         lamports,
         data: buf.to_vec(),
         owner: solana_vote_program::id(),
@@ -123,4 +118,27 @@ pub async fn create_vote_legacy(
     };
 
     context.set_account(&vote.pubkey(), &AccountSharedData::from(account));
+}
+
+#[test]
+fn test_legacy_offset() {
+    let authorized_withdrawer = Keypair::new().pubkey();
+    let vote_state = VoteState0_23_5 {
+        authorized_withdrawer,
+        ..VoteState0_23_5::default()
+    };
+    let vote_state = VoteStateVersions::V0_23_5(Box::new(vote_state));
+    let buf = bincode::serialize(&vote_state).unwrap();
+
+    let mut found_withdrawer = false;
+    for i in 0..(buf.len() - 32) {
+        let pubkey = Pubkey::new(&buf[i..(i + 32)]);
+        if pubkey == authorized_withdrawer {
+            assert_eq!(i, LEGACY_VOTE_STATE_OFFSET);
+            found_withdrawer = true;
+            break;
+        }
+    }
+
+    assert!(found_withdrawer);
 }
