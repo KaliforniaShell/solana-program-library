@@ -682,6 +682,9 @@ impl Processor {
         let post_validator_lamports = pool_stake_info.lamports();
         msg!("Stake post merge {}", post_validator_stake.delegation.stake);
 
+        // TODO get rid of calc failure and replace with arithmetic overflow
+        // and then the santity check errors can actually be descriptive
+
         let lamports_added = post_validator_lamports
             .checked_sub(pre_validator_lamports)
             .ok_or(StakePoolError::CalculationFailure)?;
@@ -951,6 +954,8 @@ impl Processor {
 
         // TODO replace range access with something the auditors wont complain about
         // XXX can vote program own other types of accounts? do i need to do further validation?
+        // XXX one thing i very do not understand is how the legacy accounts can have the enum bytes...?
+        // or was the versions enum in from the very beginning? i guess thats the only way
         let vote_account_data = &vote_account_info.try_borrow_data()?;
         let state_variant = vote_account_data[0..4]
             .try_into()
