@@ -2,7 +2,7 @@
 
 use {
     crate::{
-        error::StakePoolError, instruction::StakePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
+        error::SinglePoolError, instruction::StakePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
         MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
         VOTE_STATE_OFFSET,
     },
@@ -24,101 +24,26 @@ use {
         program_pack::Pack,
         pubkey::Pubkey,
         rent::Rent,
-        stake, system_instruction, system_program,
-        sysvar::Sysvar,
+        stake,
+        stake_history::Epoch,
+        system_instruction, system_program,
+        sysvar::{clock::Clock, Sysvar},
         vote::program as vote_program,
     },
     spl_token_2022::{extension::StateWithExtensions, state::Mint},
 };
 
-/// Deserialize the stake state from AccountInfo
-fn get_stake_state(
-    stake_account_info: &AccountInfo,
-) -> Result<(stake::state::Meta, stake::state::Stake), ProgramError> {
-    let stake_state =
-        try_from_slice_unchecked::<stake::state::StakeState>(&stake_account_info.data.borrow())?;
-    match stake_state {
-        stake::state::StakeState::Stake(meta, stake) => Ok((meta, stake)),
-        _ => Err(StakePoolError::WrongStakeState.into()),
-    }
-}
-
-// XXX HANA hana zone
-
-fn check_pool_stake_address(
-    program_id: &Pubkey,
-    vote_account_address: &Pubkey,
-    address: &Pubkey,
-) -> Result<u8, ProgramError> {
-    let (pool_stake_address, bump_seed) =
-        crate::find_pool_stake_address(program_id, vote_account_address);
-    if *address != pool_stake_address {
-        msg!(
-            "Incorrect pool stake address for vote {}, expected {}, received {}",
-            vote_account_address,
-            pool_stake_address,
-            address
-        );
-        panic!("return error here");
-    } else {
-        Ok(bump_seed)
-    }
-}
-
-fn check_pool_authority_address(
-    program_id: &Pubkey,
-    vote_account_address: &Pubkey,
-    address: &Pubkey,
-) -> Result<u8, ProgramError> {
-    let (pool_authority_address, bump_seed) =
-        crate::find_pool_authority_address(program_id, vote_account_address);
-    if *address != pool_authority_address {
-        msg!(
-            "Incorrect pool authority address for vote {}, expected {}, received {}",
-            vote_account_address,
-            pool_authority_address,
-            address
-        );
-        panic!("return error here");
-    } else {
-        Ok(bump_seed)
-    }
-}
-
-fn check_pool_mint_address(
-    program_id: &Pubkey,
-    vote_account_address: &Pubkey,
-    address: &Pubkey,
-) -> Result<u8, ProgramError> {
-    let (pool_mint_address, bump_seed) =
-        crate::find_pool_mint_address(program_id, vote_account_address);
-    if *address != pool_mint_address {
-        msg!(
-            "Incorrect pool mint address for vote {}, expected {}, received {}",
-            vote_account_address,
-            pool_mint_address,
-            address
-        );
-        panic!("return error here");
-    } else {
-        Ok(bump_seed)
-    }
-}
-
-fn check_token_program(address: &Pubkey) -> Result<(), ProgramError> {
-    let token_program_address = spl_token::id();
-    if *address != token_program_address {
-        msg!(
-            "Incorrect token program, expected {}, received {}",
-            token_program_address,
-            address
-        );
-        panic!("return error here");
-    } else {
-        Ok(())
-    }
-}
-
+// XXX TODO FIXME is this correct? i copied it from the existing stake pool
+// it uses the stake account lamport balance, which includes rent. which might not make sense?
+// since the account can never be dealloced. but it effectively doesnt use the lamports for the first mint
+// eg, if rent is 100, and i deposit 500, i hit the first branch and get 500 tokens
+// then if jon deposits 500, he hits the second, and gets 500 * 500 / 600 = 416.66
+// then if i deposit another 500 i get... 500 * 916.66 / 1100 = 416.66
+// so the calculation is good except at the edge case
+// but... if i did the thing where i took 1 lamp deposit and minted 1 token then
+// the next deposit would massively overweight the rent! i deposit 500 and get 500 * 1 / 101 = 4.95!
+// i think the solution is to calculate off of stake amount rather than lmaports
+/// Calculate pool tokens to mint, given the outstanding tokens, stake account lamports, and deposit amount
 fn calculate_deposit_amount(
     token_supply: u64,
     validator_lamports: u64,
@@ -136,6 +61,7 @@ fn calculate_deposit_amount(
     }
 }
 
+// FIXME if we change deposit to calc off state we have to change this too
 fn calculate_withdraw_amount(
     token_supply: u64,
     validator_lamports: u64,
@@ -150,7 +76,86 @@ fn calculate_withdraw_amount(
     }
 }
 
-// XXX hana zone over
+/// Deserialize the stake state from AccountInfo
+fn get_active_stake_state(
+    stake_account_info: &AccountInfo,
+    current_epoch: Epoch,
+) -> Result<stake::state::Stake, ProgramError> {
+    let stake_state =
+        try_from_slice_unchecked::<stake::state::StakeState>(&stake_account_info.data.borrow())?;
+    match stake_state {
+        stake::state::StakeState::Stake(_, stake)
+            if stake.delegation.activation_epoch < current_epoch
+                && stake.delegation.activation_epoch == Epoch::MAX =>
+        {
+            Ok(stake)
+        }
+        _ => Err(SinglePoolError::WrongStakeState.into()),
+    }
+}
+
+/// Check pool stake account address for the validator vote account
+fn check_pool_stake_address(
+    program_id: &Pubkey,
+    vote_account_address: &Pubkey,
+    address: &Pubkey,
+) -> Result<u8, ProgramError> {
+    let (pool_stake_address, bump_seed) =
+        crate::find_pool_stake_address(program_id, vote_account_address);
+    if *address != pool_stake_address {
+        msg!(
+            "Incorrect pool stake address for vote {}, expected {}, received {}",
+            vote_account_address,
+            pool_stake_address,
+            address
+        );
+        Err(SinglePoolError::InvalidPoolStakeAccount.into())
+    } else {
+        Ok(bump_seed)
+    }
+}
+
+/// Check pool authority address for the validator vote account
+fn check_pool_authority_address(
+    program_id: &Pubkey,
+    vote_account_address: &Pubkey,
+    address: &Pubkey,
+) -> Result<u8, ProgramError> {
+    let (pool_authority_address, bump_seed) =
+        crate::find_pool_authority_address(program_id, vote_account_address);
+    if *address != pool_authority_address {
+        msg!(
+            "Incorrect pool authority address for vote {}, expected {}, received {}",
+            vote_account_address,
+            pool_authority_address,
+            address
+        );
+        Err(SinglePoolError::InvalidPoolAuthority.into())
+    } else {
+        Ok(bump_seed)
+    }
+}
+
+/// Check pool mint address for the validator vote account
+fn check_pool_mint_address(
+    program_id: &Pubkey,
+    vote_account_address: &Pubkey,
+    address: &Pubkey,
+) -> Result<u8, ProgramError> {
+    let (pool_mint_address, bump_seed) =
+        crate::find_pool_mint_address(program_id, vote_account_address);
+    if *address != pool_mint_address {
+        msg!(
+            "Incorrect pool mint address for vote {}, expected {}, received {}",
+            vote_account_address,
+            pool_mint_address,
+            address
+        );
+        Err(SinglePoolError::InvalidPoolMint.into())
+    } else {
+        Ok(bump_seed)
+    }
+}
 
 /// Check mpl metadata account address for the pool mint
 fn check_mpl_metadata_account_address(
@@ -159,7 +164,7 @@ fn check_mpl_metadata_account_address(
 ) -> Result<(), ProgramError> {
     let (metadata_account_pubkey, _) = find_metadata_account(pool_mint);
     if metadata_account_pubkey != *metadata_address {
-        Err(StakePoolError::InvalidMetadataAccount.into())
+        Err(SinglePoolError::InvalidMetadataAccount.into())
     } else {
         Ok(())
     }
@@ -172,6 +177,20 @@ fn check_system_program(program_id: &Pubkey) -> Result<(), ProgramError> {
             "Expected system program {}, received {}",
             system_program::id(),
             program_id
+        );
+        Err(ProgramError::IncorrectProgramId)
+    } else {
+        Ok(())
+    }
+}
+
+/// Check token program address
+fn check_token_program(address: &Pubkey) -> Result<(), ProgramError> {
+    if *address != spl_token::id() {
+        msg!(
+            "Incorrect token program, expected {}, received {}",
+            spl_token::id(),
+            address
         );
         Err(ProgramError::IncorrectProgramId)
     } else {
@@ -636,6 +655,7 @@ impl Processor {
         let user_token_account_info = next_account_info(account_info_iter)?;
         let user_lamport_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
+        let clock = &Clock::from_account_info(clock_info)?;
         let stake_history_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
@@ -650,17 +670,15 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
-        // TODO assert pool stake state is active
-
-        let (_, pre_validator_stake) = get_stake_state(pool_stake_info)?;
+        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
         let pre_validator_lamports = pool_stake_info.lamports();
-        msg!("Stake pre merge {}", pre_validator_stake.delegation.stake);
+        msg!("Stake pre merge {}", pre_pool_stake.delegation.stake);
 
-        let (_, pre_user_stake) = get_stake_state(user_stake_info)?;
+        let pre_user_stake = get_active_stake_state(user_stake_info, clock.epoch)?;
         let user_unstaked_lamports = user_stake_info
             .lamports()
             .checked_sub(pre_user_stake.delegation.stake)
-            .ok_or(StakePoolError::CalculationFailure)?;
+            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         // we have no deposit authority, so we dont need to call stake_authorize
         // user should set both authorities to pool_authority_info
@@ -678,37 +696,37 @@ impl Processor {
             stake_program_info.clone(),
         )?;
 
-        let (_, post_validator_stake) = get_stake_state(pool_stake_info)?;
+        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
         let post_validator_lamports = pool_stake_info.lamports();
-        msg!("Stake post merge {}", post_validator_stake.delegation.stake);
+        msg!("Stake post merge {}", post_pool_stake.delegation.stake);
 
         // TODO get rid of calc failure and replace with arithmetic overflow
         // and then the santity check errors can actually be descriptive
 
         let lamports_added = post_validator_lamports
             .checked_sub(pre_validator_lamports)
-            .ok_or(StakePoolError::CalculationFailure)?;
+            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
-        let stake_added = post_validator_stake
+        let stake_added = post_pool_stake
             .delegation
             .stake
-            .checked_sub(pre_validator_stake.delegation.stake)
-            .ok_or(StakePoolError::CalculationFailure)?;
+            .checked_sub(pre_pool_stake.delegation.stake)
+            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         let leftover_rent = lamports_added
             .checked_sub(stake_added)
-            .ok_or(StakePoolError::CalculationFailure)?;
+            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         if stake_added != pre_user_stake.delegation.stake {
-            panic!("sanity check failed");
+            return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
         if leftover_rent != user_unstaked_lamports {
-            panic!("sanity check failed");
+            return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
         if user_stake_info.lamports() != 0 {
-            panic!("sanity check failed");
+            return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
         let token_supply = {
@@ -717,12 +735,16 @@ impl Processor {
             pool_mint.base.supply
         };
 
+        // XXX TODO FIXME use of lamports_added is VERY WRONG
+        // we mint tokens based on the total lamports that flow THROUGH our stake account
+        // including the rent we return!! meaning someone can steal funds
+        // we actually want to use *stake_added*. and probably (as noted at the fn def) the pre stake too
         let new_pool_tokens =
             calculate_deposit_amount(token_supply, pre_validator_lamports, lamports_added)
-                .ok_or(StakePoolError::CalculationFailure)?;
+                .ok_or(SinglePoolError::UnexpectedMathError)?;
 
         if new_pool_tokens == 0 {
-            return Err(StakePoolError::DepositTooSmall.into());
+            return Err(SinglePoolError::DepositTooSmall.into());
         }
 
         // mint tokens to the user corresponding to their deposit
@@ -767,6 +789,7 @@ impl Processor {
         let user_stake_info = next_account_info(account_info_iter)?;
         let user_token_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
+        let clock = &Clock::from_account_info(clock_info)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
@@ -780,9 +803,9 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
-        let (_, pre_validator_stake) = get_stake_state(pool_stake_info)?;
-        let pre_all_validator_lamports = pool_stake_info.lamports();
-        msg!("Stake pre split {}", pre_validator_stake.delegation.stake);
+        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
+        let pre_pool_lamports = pool_stake_info.lamports();
+        msg!("Stake pre split {}", pre_pool_stake.delegation.stake);
 
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
@@ -790,12 +813,13 @@ impl Processor {
             pool_mint.base.supply
         };
 
+        // FIXME if we change deposit to calc off state we have to change this too
         let withdraw_lamports =
-            calculate_withdraw_amount(token_supply, pre_all_validator_lamports, token_amount)
-                .ok_or(StakePoolError::CalculationFailure)?;
+            calculate_withdraw_amount(token_supply, pre_pool_lamports, token_amount)
+                .ok_or(SinglePoolError::UnexpectedMathError)?;
 
         if withdraw_lamports == 0 {
-            return Err(StakePoolError::WithdrawalTooSmall.into());
+            return Err(SinglePoolError::WithdrawalTooSmall.into());
         }
 
         // theres a *ton* of housekeeping in process_withdraw_stake that i havent read line by line fully carefully
@@ -868,7 +892,7 @@ impl Processor {
 
         if !payer_info.is_signer {
             msg!("Payer did not sign metadata creation");
-            return Err(StakePoolError::SignatureMissing.into());
+            return Err(SinglePoolError::SignatureMissing.into());
         }
 
         // checking the mint exists confirms pool is initialized
@@ -969,22 +993,22 @@ impl Processor {
                             [LEGACY_VOTE_STATE_OFFSET..(LEGACY_VOTE_STATE_OFFSET + 32)],
                     )
                 {
-                    panic!("error here, bad authority");
+                    return Err(SinglePoolError::InvalidMetadataSigner.into());
                 }
             }
             1 => {
                 if *authorized_withdrawer_info.key
                     != Pubkey::new(&vote_account_data[VOTE_STATE_OFFSET..(VOTE_STATE_OFFSET + 32)])
                 {
-                    panic!("error here, bad authority");
+                    return Err(SinglePoolError::InvalidMetadataSigner.into());
                 }
             }
-            _ => panic!("error here, invalid variant"),
+            _ => return Err(SinglePoolError::UnparseableVoteAccount.into()),
         }
 
         if !authorized_withdrawer_info.is_signer {
             msg!("Vote account authorized withdrawer did not sign metadata update");
-            return Err(StakePoolError::SignatureMissing.into());
+            return Err(SinglePoolError::SignatureMissing.into());
         }
 
         let update_metadata_accounts_instruction = update_metadata_accounts_v2(
@@ -1071,53 +1095,33 @@ impl Processor {
     }
 }
 
-impl PrintProgramError for StakePoolError {
+impl PrintProgramError for SinglePoolError {
     fn print<E>(&self)
     where
         E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
     {
         match self {
-            StakePoolError::AlreadyInUse => msg!("Error: The account cannot be initialized because it is already being used"),
-            StakePoolError::InvalidProgramAddress => msg!("Error: The program address provided doesn't match the value generated by the program"),
-            StakePoolError::InvalidState => msg!("Error: The stake pool state is invalid"),
-            StakePoolError::CalculationFailure => msg!("Error: The calculation failed"),
-            StakePoolError::FeeTooHigh => msg!("Error: Stake pool fee > 1"),
-            StakePoolError::WrongAccountMint => msg!("Error: Token account is associated with the wrong mint"),
-            StakePoolError::WrongManager => msg!("Error: Wrong pool manager account"),
-            StakePoolError::SignatureMissing => msg!("Error: Required signature is missing"),
-            StakePoolError::InvalidValidatorStakeList => msg!("Error: Invalid validator stake list account"),
-            StakePoolError::InvalidFeeAccount => msg!("Error: Invalid manager fee account"),
-            StakePoolError::WrongPoolMint => msg!("Error: Specified pool mint account is wrong"),
-            StakePoolError::WrongStakeState => msg!("Error: Stake account is not in the state expected by the program"),
-            StakePoolError::UserStakeNotActive => msg!("Error: User stake is not active"),
-            StakePoolError::ValidatorAlreadyAdded => msg!("Error: Stake account voting for this validator already exists in the pool"),
-            StakePoolError::ValidatorNotFound => msg!("Error: Stake account for this validator not found in the pool"),
-            StakePoolError::InvalidStakeAccountAddress => msg!("Error: Stake account address not properly derived from the validator address"),
-            StakePoolError::StakeListOutOfDate => msg!("Error: Identify validator stake accounts with old balances and update them"),
-            StakePoolError::StakeListAndPoolOutOfDate => msg!("Error: First update old validator stake account balances and then pool stake balance"),
-            StakePoolError::UnknownValidatorStakeAccount => {
-                msg!("Error: Validator stake account is not found in the list storage")
-            }
-            StakePoolError::WrongMintingAuthority => msg!("Error: Wrong minting authority set for mint pool account"),
-            StakePoolError::UnexpectedValidatorListAccountSize=> msg!("Error: The size of the given validator stake list does match the expected amount"),
-            StakePoolError::WrongStaker=> msg!("Error: Wrong pool staker account"),
-            StakePoolError::NonZeroPoolTokenSupply => msg!("Error: Pool token supply is not zero on initialization"),
-            StakePoolError::StakeLamportsNotEqualToMinimum => msg!("Error: The lamports in the validator stake account is not equal to the minimum"),
-            StakePoolError::IncorrectDepositVoteAddress => msg!("Error: The provided deposit stake account is not delegated to the preferred deposit vote account"),
-            StakePoolError::IncorrectWithdrawVoteAddress => msg!("Error: The provided withdraw stake account is not the preferred deposit vote account"),
-            StakePoolError::InvalidMintFreezeAuthority => msg!("Error: The mint has an invalid freeze authority"),
-            StakePoolError::FeeIncreaseTooHigh => msg!("Error: The fee cannot increase by a factor exceeding the stipulated ratio"),
-            StakePoolError::WithdrawalTooSmall => msg!("Error: Not enough pool tokens provided to withdraw 1-lamport stake"),
-            StakePoolError::DepositTooSmall => msg!("Error: Not enough lamports provided for deposit to result in one pool token"),
-            StakePoolError::InvalidStakeDepositAuthority => msg!("Error: Provided stake deposit authority does not match the program's"),
-            StakePoolError::InvalidSolDepositAuthority => msg!("Error: Provided sol deposit authority does not match the program's"),
-            StakePoolError::InvalidPreferredValidator => msg!("Error: Provided preferred validator is invalid"),
-            StakePoolError::TransientAccountInUse => msg!("Error: Provided validator stake account already has a transient stake account in use"),
-            StakePoolError::InvalidSolWithdrawAuthority => msg!("Error: Provided sol withdraw authority does not match the program's"),
-            StakePoolError::SolWithdrawalTooLarge => msg!("Error: Too much SOL withdrawn from the stake pool's reserve account"),
-            StakePoolError::InvalidMetadataAccount => msg!("Error: Metadata account derived from pool mint account does not match the one passed to program"),
-            StakePoolError::UnsupportedMintExtension => msg!("Error: mint has an unsupported extension"),
-            StakePoolError::UnsupportedFeeAccountExtension => msg!("Error: fee account has an unsupported extension"),
+            SinglePoolError::InvalidPoolStakeAccount =>
+                msg!("Error: Provided pool stake account does not match stake account derived for validator vote account."),
+            SinglePoolError::InvalidPoolAuthority =>
+                msg!("Error: Provided pool authority does not match authority derived for validator vote account."),
+            SinglePoolError::InvalidPoolMint =>
+                msg!("Error: Provided pool mint does not match mint derived for validator vote account."),
+            SinglePoolError::InvalidMetadataAccount =>
+                msg!("Error: Provided metadata account does not match metadata account derived for pool mint."),
+            SinglePoolError::InvalidMetadataSigner =>
+                msg!("Error: Authorized withdrawer provided for metadata update does not match the vote account."),
+            SinglePoolError::DepositTooSmall =>
+                msg!("Error: Not enough lamports provided for deposit to result in one pool token."),
+            SinglePoolError::WithdrawalTooSmall =>
+                msg!("Error: Not enough pool tokens provided to withdraw stake worth one lamport."),
+            SinglePoolError::SignatureMissing => msg!("Error: Required signature is missing."),
+            SinglePoolError::WrongStakeState => msg!("Error: Stake account is not in the state expected by the program."),
+            SinglePoolError::ArithmeticUnderflow => msg!("Error: Unsigned subtraction crossed the zero."),
+            SinglePoolError::UnexpectedMathError =>
+                msg!("Error: A calculation failed unexpectedly. \
+                     (This error should never be surfaced; it stands in for failure conditions that should never be reached.)"),
+            SinglePoolError::UnparseableVoteAccount => msg!("Error: Failed to parse vote account."),
         }
     }
 }
