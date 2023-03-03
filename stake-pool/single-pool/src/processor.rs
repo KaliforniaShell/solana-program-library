@@ -2,7 +2,7 @@
 
 use {
     crate::{
-        error::SinglePoolError, instruction::StakePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
+        error::SinglePoolError, instruction::SinglePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
         MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
         VOTE_STATE_OFFSET,
     },
@@ -1019,19 +1019,19 @@ impl Processor {
 
     /// Processes [Instruction](enum.Instruction.html).
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
-        let instruction = StakePoolInstruction::try_from_slice(input)?;
+        let instruction = SinglePoolInstruction::try_from_slice(input)?;
         match instruction {
-            StakePoolInstruction::Initialize => {
+            SinglePoolInstruction::Initialize => {
                 msg!("Instruction: Initialize");
                 Self::process_initialize(program_id, accounts)
             }
-            StakePoolInstruction::DepositStake {
+            SinglePoolInstruction::DepositStake {
                 vote_account_address,
             } => {
                 msg!("Instruction: DepositStake");
                 Self::process_deposit_stake(program_id, accounts, &vote_account_address)
             }
-            StakePoolInstruction::WithdrawStake {
+            SinglePoolInstruction::WithdrawStake {
                 vote_account_address,
                 user_stake_authority,
                 token_amount,
@@ -1045,7 +1045,7 @@ impl Processor {
                     token_amount,
                 )
             }
-            StakePoolInstruction::CreateTokenMetadata {
+            SinglePoolInstruction::CreateTokenMetadata {
                 vote_account_address,
             } => {
                 msg!("Instruction: CreateTokenMetadata");
@@ -1055,7 +1055,7 @@ impl Processor {
                     &vote_account_address,
                 )
             }
-            StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri } => {
+            SinglePoolInstruction::UpdateTokenMetadata { name, symbol, uri } => {
                 msg!("Instruction: UpdateTokenMetadata");
                 Self::process_update_pool_token_metadata(program_id, accounts, name, symbol, uri)
             }

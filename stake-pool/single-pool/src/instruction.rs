@@ -15,8 +15,8 @@ use {
 /// Instructions supported by the StakePool program.
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
-pub enum StakePoolInstruction {
-    ///   Initialize a new [bikeshed name].
+pub enum SinglePoolInstruction {
+    ///   Initialize a new single-pool.
     ///
     ///   0. `[]` Validator vote account
     ///   1. `[s, w]` Fee-payer
@@ -102,7 +102,7 @@ pub enum StakePoolInstruction {
 
 /// Creates an `Initialize` instruction, plus helper instruction(s).
 pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Vec<Instruction> {
-    let data = StakePoolInstruction::Initialize.try_to_vec().unwrap();
+    let data = SinglePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
         AccountMeta::new(*payer, true),
@@ -148,7 +148,7 @@ pub fn deposit_stake(
     user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let data = StakePoolInstruction::DepositStake {
+    let data = SinglePoolInstruction::DepositStake {
         vote_account_address: *vote_account,
     }
     .try_to_vec()
@@ -209,7 +209,7 @@ pub fn withdraw_stake(
     token_amount: u64,
 ) -> Vec<Instruction> {
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let data = StakePoolInstruction::WithdrawStake {
+    let data = SinglePoolInstruction::WithdrawStake {
         vote_account_address: *vote_account,
         user_stake_authority: *user_stake_authority,
         token_amount,
@@ -264,7 +264,7 @@ pub fn create_token_metadata(
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
     let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
-    let data = StakePoolInstruction::CreateTokenMetadata {
+    let data = SinglePoolInstruction::CreateTokenMetadata {
         vote_account_address: *vote_account,
     }
     .try_to_vec()
@@ -298,7 +298,7 @@ pub fn update_token_metadata(
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
     let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
-    let data = StakePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
+    let data = SinglePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
         .try_to_vec()
         .unwrap();
 
