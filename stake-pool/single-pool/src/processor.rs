@@ -226,20 +226,6 @@ fn check_mpl_metadata_program(program_id: &Pubkey) -> Result<(), ProgramError> {
     }
 }
 
-/// Check rent sysvar correctness
-fn check_rent_sysvar(sysvar_key: &Pubkey) -> Result<(), ProgramError> {
-    if *sysvar_key != solana_program::sysvar::rent::id() {
-        msg!(
-            "Expected rent sysvar {}, received {}",
-            solana_program::sysvar::rent::id(),
-            sysvar_key
-        );
-        Err(ProgramError::InvalidArgument)
-    } else {
-        Ok(())
-    }
-}
-
 /// Check account owner is the given program
 fn check_account_owner(
     account_info: &AccountInfo,
@@ -876,7 +862,6 @@ impl Processor {
         let metadata_info = next_account_info(account_info_iter)?;
         let mpl_token_metadata_program_info = next_account_info(account_info_iter)?;
         let system_program_info = next_account_info(account_info_iter)?;
-        let rent_sysvar_info = next_account_info(account_info_iter)?;
 
         let bump_seed = check_pool_authority_address(
             program_id,
@@ -885,7 +870,6 @@ impl Processor {
         )?;
         check_pool_mint_address(program_id, vote_account_address, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
-        check_rent_sysvar(rent_sysvar_info.key)?;
         check_account_owner(payer_info, &system_program::id())?;
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, pool_mint_info.key)?;
@@ -941,7 +925,6 @@ impl Processor {
                 payer_info.clone(),
                 pool_authority_info.clone(),
                 system_program_info.clone(),
-                rent_sysvar_info.clone(),
                 mpl_token_metadata_program_info.clone(),
             ],
             signers,

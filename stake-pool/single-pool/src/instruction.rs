@@ -78,7 +78,6 @@ pub enum StakePoolInstruction {
     ///   3. `[w]` Token metadata account
     ///   4. `[]` Metadata program id
     ///   5. `[]` System program id
-    ///   6. `[]` Rent sysvar
     CreateTokenMetadata {
         /// Validator vote account address
         vote_account_address: Pubkey,
@@ -278,7 +277,6 @@ pub fn create_token_metadata(
         AccountMeta::new(token_metadata, false),
         AccountMeta::new_readonly(mpl_token_metadata::id(), false),
         AccountMeta::new_readonly(system_program::id(), false),
-        AccountMeta::new_readonly(sysvar::rent::id(), false),
     ];
 
     Instruction {
