@@ -33,42 +33,32 @@ use {
     spl_token_2022::{extension::StateWithExtensions, state::Mint},
 };
 
-// XXX TODO FIXME is this correct? i copied it from the existing stake pool
-// it uses the stake account lamport balance, which includes rent. which might not make sense?
-// since the account can never be dealloced. but it effectively doesnt use the lamports for the first mint
-// eg, if rent is 100, and i deposit 500, i hit the first branch and get 500 tokens
-// then if jon deposits 500, he hits the second, and gets 500 * 500 / 600 = 416.66
-// then if i deposit another 500 i get... 500 * 916.66 / 1100 = 416.66
-// so the calculation is good except at the edge case
-// but... if i did the thing where i took 1 lamp deposit and minted 1 token then
-// the next deposit would massively overweight the rent! i deposit 500 and get 500 * 1 / 101 = 4.95!
-// i think the solution is to calculate off of stake amount rather than lmaports
-/// Calculate pool tokens to mint, given the outstanding tokens, stake account lamports, and deposit amount
+/// Calculate pool tokens to mint, given outstanding token supply, pool active stake, and deposit active stake
 fn calculate_deposit_amount(
-    token_supply: u64,
-    validator_lamports: u64,
-    deposit_lamports: u64,
+    pre_token_supply: u64,
+    pre_pool_stake: u64,
+    user_stake_to_deposit: u64,
 ) -> Option<u64> {
-    if validator_lamports == 0 || token_supply == 0 {
-        Some(deposit_lamports)
+    if pre_pool_stake == 0 || pre_token_supply == 0 {
+        Some(user_stake_to_deposit)
     } else {
         u64::try_from(
-            (deposit_lamports as u128)
-                .checked_mul(token_supply as u128)?
-                .checked_div(validator_lamports as u128)?,
+            (user_stake_to_deposit as u128)
+                .checked_mul(pre_token_supply as u128)?
+                .checked_div(pre_pool_stake as u128)?,
         )
         .ok()
     }
 }
 
-// FIXME if we change deposit to calc off state we have to change this too
+/// Calculate pool stake to return, given outstanding token supply, pool active stake, and tokens to redeem
 fn calculate_withdraw_amount(
-    token_supply: u64,
-    validator_lamports: u64,
-    burn_tokens: u64,
+    pre_token_supply: u64,
+    pre_pool_stake: u64,
+    user_tokens_to_burn: u64,
 ) -> Option<u64> {
-    let numerator = (burn_tokens as u128).checked_mul(validator_lamports as u128)?;
-    let denominator = token_supply as u128;
+    let numerator = (user_tokens_to_burn as u128).checked_mul(pre_pool_stake as u128)?;
+    let denominator = pre_token_supply as u128;
     if numerator < denominator || denominator == 0 {
         Some(0)
     } else {
@@ -656,14 +646,18 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
-        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
-        let pre_validator_lamports = pool_stake_info.lamports();
-        msg!("Stake pre merge {}", pre_pool_stake.delegation.stake);
+        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
+            .delegation
+            .stake;
+        let pre_pool_lamports = pool_stake_info.lamports();
+        msg!("Stake pre merge {}", pre_pool_stake);
 
-        let pre_user_stake = get_active_stake_state(user_stake_info, clock.epoch)?;
+        let pre_user_stake = get_active_stake_state(user_stake_info, clock.epoch)?
+            .delegation
+            .stake;
         let user_unstaked_lamports = user_stake_info
             .lamports()
-            .checked_sub(pre_user_stake.delegation.stake)
+            .checked_sub(pre_user_stake)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         // we have no deposit authority, so we dont need to call stake_authorize
@@ -682,28 +676,25 @@ impl Processor {
             stake_program_info.clone(),
         )?;
 
-        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
-        let post_validator_lamports = pool_stake_info.lamports();
-        msg!("Stake post merge {}", post_pool_stake.delegation.stake);
+        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
+            .delegation
+            .stake;
+        let post_pool_lamports = pool_stake_info.lamports();
+        msg!("Stake post merge {}", post_pool_stake);
 
-        // TODO get rid of calc failure and replace with arithmetic overflow
-        // and then the santity check errors can actually be descriptive
-
-        let lamports_added = post_validator_lamports
-            .checked_sub(pre_validator_lamports)
+        let lamports_added = post_pool_lamports
+            .checked_sub(pre_pool_lamports)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         let stake_added = post_pool_stake
-            .delegation
-            .stake
-            .checked_sub(pre_pool_stake.delegation.stake)
+            .checked_sub(pre_pool_stake)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
         let leftover_rent = lamports_added
             .checked_sub(stake_added)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
-        if stake_added != pre_user_stake.delegation.stake {
+        if stake_added != pre_user_stake {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
@@ -721,13 +712,8 @@ impl Processor {
             pool_mint.base.supply
         };
 
-        // XXX TODO FIXME use of lamports_added is VERY WRONG
-        // we mint tokens based on the total lamports that flow THROUGH our stake account
-        // including the rent we return!! meaning someone can steal funds
-        // we actually want to use *stake_added*. and probably (as noted at the fn def) the pre stake too
-        let new_pool_tokens =
-            calculate_deposit_amount(token_supply, pre_validator_lamports, lamports_added)
-                .ok_or(SinglePoolError::UnexpectedMathError)?;
+        let new_pool_tokens = calculate_deposit_amount(token_supply, pre_pool_stake, stake_added)
+            .ok_or(SinglePoolError::UnexpectedMathError)?;
 
         if new_pool_tokens == 0 {
             return Err(SinglePoolError::DepositTooSmall.into());
@@ -789,9 +775,10 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
-        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?;
-        let pre_pool_lamports = pool_stake_info.lamports();
-        msg!("Stake pre split {}", pre_pool_stake.delegation.stake);
+        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
+            .delegation
+            .stake;
+        msg!("Stake pre split {}", pre_pool_stake);
 
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
@@ -799,12 +786,10 @@ impl Processor {
             pool_mint.base.supply
         };
 
-        // FIXME if we change deposit to calc off state we have to change this too
-        let withdraw_lamports =
-            calculate_withdraw_amount(token_supply, pre_pool_lamports, token_amount)
-                .ok_or(SinglePoolError::UnexpectedMathError)?;
+        let withdraw_stake = calculate_withdraw_amount(token_supply, pre_pool_stake, token_amount)
+            .ok_or(SinglePoolError::UnexpectedMathError)?;
 
-        if withdraw_lamports == 0 {
+        if withdraw_stake == 0 {
             return Err(SinglePoolError::WithdrawalTooSmall.into());
         }
 
@@ -829,7 +814,7 @@ impl Processor {
             pool_stake_info.clone(),
             pool_authority_info.clone(),
             bump_seed,
-            withdraw_lamports,
+            withdraw_stake,
             user_stake_info.clone(),
         )?;
 
