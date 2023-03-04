@@ -22,7 +22,8 @@ const POOL_MINT_PREFIX: &[u8] = b"mint";
 
 const MINT_DECIMALS: u8 = 9;
 
-const VOTE_STATE_OFFSET: usize = 4;
+const VOTE_STATE_START: usize = 4;
+const VOTE_STATE_END: usize = 36;
 
 // XXX obviously i hate this and if anyone has a better idea...
 // XXX this is only pub for testing purposes because the struct is in tests. not sure if theres a better way
@@ -33,7 +34,8 @@ const VOTE_STATE_OFFSET: usize = 4;
 // + (32 + 8 * 3) * 32 + 8 (prior_voters)
 // = 1876
 /// doc
-pub const LEGACY_VOTE_STATE_OFFSET: usize = 1876;
+pub const LEGACY_VOTE_STATE_START: usize = 1876;
+const LEGACY_VOTE_STATE_END: usize = 1908;
 
 fn find_address(program_id: &Pubkey, vote_account_address: &Pubkey, prefix: &[u8]) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[prefix, vote_account_address.as_ref()], program_id)

@@ -34,7 +34,7 @@ use {
         },
     },
     spl_associated_token_account as atoken, spl_stake_pool as mpool,
-    spl_stake_single_pool::LEGACY_VOTE_STATE_OFFSET,
+    spl_stake_single_pool::LEGACY_VOTE_STATE_START,
     spl_token_2022::extension::{ExtensionType, StateWithExtensionsOwned},
     std::{collections::VecDeque, convert::TryInto, num::NonZeroU32},
 };
@@ -134,7 +134,7 @@ fn test_legacy_offset() {
     for i in 0..(buf.len() - 32) {
         let pubkey = Pubkey::new(&buf[i..(i + 32)]);
         if pubkey == authorized_withdrawer {
-            assert_eq!(i, LEGACY_VOTE_STATE_OFFSET);
+            assert_eq!(i, LEGACY_VOTE_STATE_START);
             found_withdrawer = true;
             break;
         }

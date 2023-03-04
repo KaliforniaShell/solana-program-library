@@ -2,9 +2,9 @@
 
 use {
     crate::{
-        error::SinglePoolError, instruction::SinglePoolInstruction, LEGACY_VOTE_STATE_OFFSET,
-        MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX,
-        VOTE_STATE_OFFSET,
+        error::SinglePoolError, instruction::SinglePoolInstruction, LEGACY_VOTE_STATE_END,
+        LEGACY_VOTE_STATE_START, MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX,
+        POOL_STAKE_PREFIX, VOTE_STATE_END, VOTE_STATE_START,
     },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
@@ -594,29 +594,6 @@ impl Processor {
         Ok(())
     }
 
-    // XXX ok cool next up ummm
-    // the other two functions are extremely simplified version of their namesakes
-    // for deposit we literally only need to call stake_merge (or a hana version), not authorize
-    // because the user can et both authorities to ours rather than going through deposit authority
-    //
-    // and then the token calculation is just...
-    // stake added * total tokens / total stake ?
-    //
-    // "total deposit" is simply, post lamps minus pre lamps
-    // "stake deposit" is post stake minus pre stake
-    // "sol deposit" is total deposit minus stake deposit
-    // so it calcs "new pool" and "new pool from stake" from quantities 1 and 2
-    // then "new pool from sol" as "new pool" minus "new pool from stake"
-    // it calcs stake and sol deposit fees... and the total fee is the sum of them
-    // "pool tokens user" then is "new pool" minus "total fee"
-    // and finally it mints this. so...
-    // im not sure why "sol deposit" should ever be nonzero? unless is this the rent?
-    // assuming its rent (actually this makes sense, its not active stake!), we can just kick it back to the user
-    // this means all the calculation goes basically goes away
-    // can user withdraw their own rent? the account wouldnt get zeroed until the end of the txn
-    // if so lol just. check lamps minus stake is zero and mint tokens commesurate to the stake
-    // if its not possible tho just take a wallet do the merge and send back the extra lamps
-
     #[inline(never)] // needed to avoid stack size violation
     fn process_deposit_stake(
         program_id: &Pubkey,
@@ -865,7 +842,7 @@ impl Processor {
         }
 
         // checking the mint exists confirms pool is initialized
-        // TODO put this in a utility function? do something smarter/simpler?
+        // TODO put this in a utility function? do something smarter/simpler? maybe just check the first n bytes?
         {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let _ = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
@@ -944,38 +921,33 @@ impl Processor {
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
-        // TODO replace range access with something the auditors wont complain about
         // XXX can vote program own other types of accounts? do i need to do further validation?
         // XXX one thing i very do not understand is how the legacy accounts can have the enum bytes...?
         // or was the versions enum in from the very beginning? i guess thats the only way
         let vote_account_data = &vote_account_info.try_borrow_data()?;
-        let state_variant = vote_account_data[0..4]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidArgument)?;
+        let state_variant = vote_account_data
+            .get(..VOTE_STATE_START)
+            .and_then(|s| s.try_into().ok())
+            .ok_or(SinglePoolError::UnparseableVoteAccount)?;
 
-        match u32::from_le_bytes(state_variant) {
-            0 => {
-                if *authorized_withdrawer_info.key
-                    != Pubkey::new(
-                        &vote_account_data
-                            [LEGACY_VOTE_STATE_OFFSET..(LEGACY_VOTE_STATE_OFFSET + 32)],
-                    )
-                {
-                    return Err(SinglePoolError::InvalidMetadataSigner.into());
-                }
-            }
-            1 => {
-                if *authorized_withdrawer_info.key
-                    != Pubkey::new(&vote_account_data[VOTE_STATE_OFFSET..(VOTE_STATE_OFFSET + 32)])
-                {
-                    return Err(SinglePoolError::InvalidMetadataSigner.into());
-                }
-            }
+        let (withdrawer_start, withdrawer_end) = match u32::from_le_bytes(state_variant) {
+            0 => (LEGACY_VOTE_STATE_START, LEGACY_VOTE_STATE_END),
+            1 => (VOTE_STATE_START, VOTE_STATE_END),
             _ => return Err(SinglePoolError::UnparseableVoteAccount.into()),
+        };
+
+        let vote_account_withdrawer = &vote_account_data
+            .get(withdrawer_start..withdrawer_end)
+            .map(Pubkey::new)
+            .ok_or(SinglePoolError::UnparseableVoteAccount)?;
+
+        if authorized_withdrawer_info.key != vote_account_withdrawer {
+            msg!("Vote account authorized withdrawer does not match the account provided.");
+            return Err(SinglePoolError::InvalidMetadataSigner.into());
         }
 
         if !authorized_withdrawer_info.is_signer {
-            msg!("Vote account authorized withdrawer did not sign metadata update");
+            msg!("Vote account authorized withdrawer did not sign metadata update.");
             return Err(SinglePoolError::SignatureMissing.into());
         }
 
