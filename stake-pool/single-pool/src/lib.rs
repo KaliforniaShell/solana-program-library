@@ -13,7 +13,8 @@ pub mod entrypoint;
 pub use solana_program;
 use solana_program::pubkey::Pubkey;
 
-// XXX change this
+// XXX TODO FIXME change this
+// (XXX ask how do we as a company handle privkeys for our onchain programs?)
 solana_program::declare_id!("3cqnsMsT6LE96pxv7GR4di5rLqHDZZbR3FbeSUeRLFqY");
 
 const POOL_STAKE_PREFIX: &[u8] = b"stake";
@@ -22,19 +23,18 @@ const POOL_MINT_PREFIX: &[u8] = b"mint";
 
 const MINT_DECIMALS: u8 = 9;
 
+// authorized withdrawer starts immediately after the enum tag
 const VOTE_STATE_START: usize = 4;
 const VOTE_STATE_END: usize = 36;
 
-// XXX obviously i hate this and if anyone has a better idea...
-// XXX this is only pub for testing purposes because the struct is in tests. not sure if theres a better way
-//    4 (enum)
+// authorized withdrawer starts at:
+//    4 (enum tag)
 // + 32 (node_pubkey)
 // + 32 (authorized_voter)
 // +  8 (authorized_voter_epoch)
 // + (32 + 8 * 3) * 32 + 8 (prior_voters)
 // = 1876
-/// doc
-pub const LEGACY_VOTE_STATE_START: usize = 1876;
+const LEGACY_VOTE_STATE_START: usize = 1876;
 const LEGACY_VOTE_STATE_END: usize = 1908;
 
 fn find_address(program_id: &Pubkey, vote_account_address: &Pubkey, prefix: &[u8]) -> (Pubkey, u8) {
@@ -57,4 +57,11 @@ pub fn find_pool_authority_address(
 /// doc
 pub fn find_pool_mint_address(program_id: &Pubkey, vote_account_address: &Pubkey) -> (Pubkey, u8) {
     find_address(program_id, vote_account_address, POOL_MINT_PREFIX)
+}
+
+#[allow(missing_docs)]
+/// Internal constants confined to a suggestively named submodule for use in tests.
+pub mod test_variable {
+    pub const LEGACY_VOTE_STATE_START: usize = super::LEGACY_VOTE_STATE_START;
+    pub const LEGACY_VOTE_STATE_END: usize = super::LEGACY_VOTE_STATE_END;
 }
