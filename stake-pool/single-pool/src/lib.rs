@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-//! A program for creating and managing pools of stake
+//! A program for liquid staking with a single validator
 
 pub mod error;
 pub mod instruction;
@@ -41,12 +41,12 @@ fn find_address(program_id: &Pubkey, vote_account_address: &Pubkey, prefix: &[u8
     Pubkey::find_program_address(&[prefix, vote_account_address.as_ref()], program_id)
 }
 
-/// doc
+/// Find the canonical stake account address for a given vote account.
 pub fn find_pool_stake_address(program_id: &Pubkey, vote_account_address: &Pubkey) -> (Pubkey, u8) {
     find_address(program_id, vote_account_address, POOL_STAKE_PREFIX)
 }
 
-/// doc
+/// Find the canonical authority address for a given vote account.
 pub fn find_pool_authority_address(
     program_id: &Pubkey,
     vote_account_address: &Pubkey,
@@ -54,7 +54,7 @@ pub fn find_pool_authority_address(
     find_address(program_id, vote_account_address, POOL_AUTHORITY_PREFIX)
 }
 
-/// doc
+/// Find the canonical token mint address for a given vote account.
 pub fn find_pool_mint_address(program_id: &Pubkey, vote_account_address: &Pubkey) -> (Pubkey, u8) {
     find_address(program_id, vote_account_address, POOL_MINT_PREFIX)
 }

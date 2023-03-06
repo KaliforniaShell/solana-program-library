@@ -6,7 +6,7 @@ use {
     thiserror::Error,
 };
 
-/// Errors that may be returned by the StakePool program.
+/// Errors that may be returned by the SinglePool program.
 #[derive(Clone, Debug, Eq, Error, FromPrimitive, PartialEq)]
 pub enum SinglePoolError {
     // 0.

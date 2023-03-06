@@ -12,11 +12,11 @@ use {
     },
 };
 
-/// Instructions supported by the StakePool program.
+/// Instructions supported by the SinglePool program.
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
 pub enum SinglePoolInstruction {
-    ///   Initialize a new single-pool.
+    ///   Initialize a new single-validator pool.
     ///
     ///   0. `[]` Validator vote account
     ///   1. `[s, w]` Fee-payer
