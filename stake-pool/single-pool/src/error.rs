@@ -51,6 +51,9 @@ pub enum SinglePoolError {
     /// Failed to parse vote account.
     #[error("UnparseableVoteAccount")]
     UnparseableVoteAccount,
+    /// Incorrect number of lamports provided for rent-exemption when initializing.
+    #[error("WrongRentAmount")]
+    WrongRentAmount,
 }
 impl From<SinglePoolError> for ProgramError {
     fn from(e: SinglePoolError) -> Self {
@@ -59,6 +62,6 @@ impl From<SinglePoolError> for ProgramError {
 }
 impl<T> DecodeError<T> for SinglePoolError {
     fn type_of() -> &'static str {
-        "Single Pool Error"
+        "Single-Validator Pool Error"
     }
 }

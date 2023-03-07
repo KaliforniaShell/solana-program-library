@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use {
+    crate::INITIAL_LAMPORTS,
     borsh::{BorshDeserialize, BorshSerialize},
     mpl_token_metadata::pda::find_metadata_account,
     solana_program::{
@@ -114,7 +115,9 @@ pub fn initialize(
 ) -> Vec<Instruction> {
     let (stake_address, _) = crate::find_pool_stake_address(program_id, vote_account);
     let stake_space = std::mem::size_of::<stake::state::StakeState>();
-    let stake_rent_plus_one = rent.minimum_balance(stake_space).saturating_add(1);
+    let stake_rent_plus_one = rent
+        .minimum_balance(stake_space)
+        .saturating_add(INITIAL_LAMPORTS);
 
     let (mint_address, _) = crate::find_pool_mint_address(program_id, vote_account);
     let mint_space = spl_token::state::Mint::LEN;

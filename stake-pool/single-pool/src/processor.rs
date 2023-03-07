@@ -2,9 +2,9 @@
 
 use {
     crate::{
-        error::SinglePoolError, instruction::SinglePoolInstruction, LEGACY_VOTE_STATE_END,
-        LEGACY_VOTE_STATE_START, MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX,
-        POOL_STAKE_PREFIX, VOTE_STATE_END, VOTE_STATE_START,
+        error::SinglePoolError, instruction::SinglePoolInstruction, INITIAL_LAMPORTS,
+        LEGACY_VOTE_STATE_END, LEGACY_VOTE_STATE_START, MINT_DECIMALS, POOL_AUTHORITY_PREFIX,
+        POOL_MINT_PREFIX, POOL_STAKE_PREFIX, VOTE_STATE_END, VOTE_STATE_START,
     },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
@@ -507,7 +507,7 @@ impl Processor {
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
         if pool_mint_info.lamports() != mint_rent {
-            panic!("mint rent error");
+            return Err(SinglePoolError::WrongRentAmount.into());
         }
 
         invoke_signed(
@@ -540,9 +540,12 @@ impl Processor {
 
         // create the pool stake account
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
-        let stake_rent_plus_one = rent.minimum_balance(stake_space).saturating_add(1);
-        if pool_stake_info.lamports() != stake_rent_plus_one {
-            panic!("stake rent error");
+        let stake_rent_plus_initial = rent
+            .minimum_balance(stake_space)
+            .saturating_add(INITIAL_LAMPORTS);
+
+        if pool_stake_info.lamports() != stake_rent_plus_initial {
+            return Err(SinglePoolError::WrongRentAmount.into());
         }
 
         let authorized = stake::state::Authorized::auto(pool_authority_info.key);
@@ -680,11 +683,11 @@ impl Processor {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
-        // we add one to the token supply to account for the initialization lamport
+        // we add initial lamports to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply.saturating_add(1)
+            pool_mint.base.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
         let new_pool_tokens = calculate_deposit_amount(token_supply, pre_pool_stake, stake_added)
@@ -755,11 +758,11 @@ impl Processor {
             .stake;
         msg!("Stake pre split {}", pre_pool_stake);
 
-        // we add one to the token supply to account for the initialization lamport
+        // we add initial lamports to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply.saturating_add(1)
+            pool_mint.base.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
         let withdraw_stake = calculate_withdraw_amount(token_supply, pre_pool_stake, token_amount)
@@ -1062,6 +1065,8 @@ impl PrintProgramError for SinglePoolError {
                 msg!("Error: A calculation failed unexpectedly. \
                      (This error should never be surfaced; it stands in for failure conditions that should never be reached.)"),
             SinglePoolError::UnparseableVoteAccount => msg!("Error: Failed to parse vote account."),
+            SinglePoolError::WrongRentAmount =>
+                msg!("Error: Incorrect number of lamports provided for rent-exemption when initializing."),
         }
     }
 }
