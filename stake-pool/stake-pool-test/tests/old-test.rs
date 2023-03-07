@@ -80,10 +80,12 @@ impl PoolAccounts {
         )
         .await;
 
+        let rent = banks_client.get_rent().await.unwrap();
         let instructions = spl_stake_single_pool::instruction::initialize(
             &id(),
             &self.vote_account.pubkey(),
             &payer.pubkey(),
+            &rent,
         );
         let message = Message::new(&instructions, Some(&payer.pubkey()));
         let transaction = Transaction::new(&[payer], message, *recent_blockhash);
@@ -333,7 +335,7 @@ async fn deposit_withdraw_success() {
         withdrawer: user.pubkey(),
     };
 
-    let stake_lamports = create_independent_stake_account(
+    create_independent_stake_account(
         &mut context.banks_client,
         &user,
         &context.last_blockhash,

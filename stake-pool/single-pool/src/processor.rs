@@ -451,7 +451,6 @@ impl Processor {
     fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let validator_vote_info = next_account_info(account_info_iter)?;
-        let payer_info = next_account_info(account_info_iter)?;
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
@@ -500,26 +499,26 @@ impl Processor {
         // change to Rent::get() if i get rid of the invokes that require the AccountInfo
         let rent = &Rent::from_account_info(rent_info)?;
 
+        // TODO clean up comments to have Official Voice, i wrote them like this when this was a poc
         // we can create the mint and stake in separate instructions
         // i just like it this way because no account validation required lol
 
         // create the pool mint
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
+        if pool_mint_info.lamports() != mint_rent {
+            panic!("mint rent error");
+        }
 
         invoke_signed(
-            &system_instruction::create_account(
-                payer_info.key,
-                pool_mint_info.key,
-                mint_rent,
-                mint_space as u64,
-                token_program_info.key,
-            ),
-            &[
-                payer_info.clone(),
-                pool_mint_info.clone(),
-                system_program_info.clone(),
-            ],
+            &system_instruction::allocate(pool_mint_info.key, mint_space as u64),
+            &[pool_mint_info.clone(), system_program_info.clone()],
+            mint_signers,
+        )?;
+
+        invoke_signed(
+            &system_instruction::assign(pool_mint_info.key, token_program_info.key),
+            &[pool_mint_info.clone(), system_program_info.clone()],
             mint_signers,
         )?;
 
@@ -541,22 +540,22 @@ impl Processor {
 
         // create the pool stake account
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
-        let required_lamports = rent.minimum_balance(stake_space).saturating_add(1);
+        let stake_rent_plus_one = rent.minimum_balance(stake_space).saturating_add(1);
+        if pool_stake_info.lamports() != stake_rent_plus_one {
+            panic!("stake rent error");
+        }
+
         let authorized = stake::state::Authorized::auto(pool_authority_info.key);
 
         invoke_signed(
-            &system_instruction::create_account(
-                payer_info.key,
-                pool_stake_info.key,
-                required_lamports,
-                stake_space as u64,
-                stake_program_info.key,
-            ),
-            &[
-                payer_info.clone(),
-                pool_stake_info.clone(),
-                stake_program_info.clone(),
-            ],
+            &system_instruction::allocate(pool_stake_info.key, stake_space as u64),
+            &[pool_stake_info.clone(), system_program_info.clone()],
+            stake_signers,
+        )?;
+
+        invoke_signed(
+            &system_instruction::assign(pool_stake_info.key, stake_program_info.key),
+            &[pool_stake_info.clone(), system_program_info.clone()],
             stake_signers,
         )?;
 

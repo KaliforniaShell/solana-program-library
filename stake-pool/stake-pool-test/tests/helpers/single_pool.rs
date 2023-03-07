@@ -59,8 +59,13 @@ impl SinglePoolAccounts {
             create_vote(context, &self.validator, &self.vote_account).await;
         }
 
-        let instructions =
-            instruction::initialize(&id(), &self.vote_account.pubkey(), &context.payer.pubkey());
+        let rent = context.banks_client.get_rent().await.unwrap();
+        let instructions = instruction::initialize(
+            &id(),
+            &self.vote_account.pubkey(),
+            &context.payer.pubkey(),
+            &rent,
+        );
         let message = Message::new(&instructions, Some(&context.payer.pubkey()));
         let transaction = Transaction::new(&[&context.payer], message, context.last_blockhash);
 

@@ -7,8 +7,10 @@ use {
     mpl_token_metadata::pda::find_metadata_account,
     solana_program::{
         instruction::{AccountMeta, Instruction},
+        program_pack::Pack,
         pubkey::Pubkey,
-        stake, system_program, sysvar,
+        rent::Rent,
+        stake, system_instruction, system_program, sysvar,
     },
 };
 
@@ -19,17 +21,16 @@ pub enum SinglePoolInstruction {
     ///   Initialize a new single-validator pool.
     ///
     ///   0. `[]` Validator vote account
-    ///   1. `[s, w]` Fee-payer
-    ///   2. `[w]` Pool stake account
-    ///   3. `[w]` Pool authority
-    ///   4. `[w]` Pool token mint
-    ///   5. `[]` Rent sysvar
-    ///   6. `[]` Clock sysvar
-    ///   7. `[]` Stake history sysvar
-    ///   8. `[]` Stake config sysvar
-    ///   9. `[]` System program
-    ///  10. `[]` Token program
-    ///  11. `[]` Stake program
+    ///   1. `[w]` Pool stake account
+    ///   2. `[w]` Pool authority
+    ///   3. `[w]` Pool token mint
+    ///   4. `[]` Rent sysvar
+    ///   5. `[]` Clock sysvar
+    ///   6. `[]` Stake history sysvar
+    ///   7. `[]` Stake config sysvar
+    ///   8. `[]` System program
+    ///   9. `[]` Token program
+    ///  10. `[]` Stake program
     Initialize,
 
     ///   Deposit some stake into the pool.  The output is a "pool" token representing ownership
@@ -100,24 +101,39 @@ pub enum SinglePoolInstruction {
     },
 }
 
+// XXX ok for the rent xfer thing jon suggested
+// * fn that just makes the 1 ixn
+// * fn that makes all the ixns given rent numbers
+// * async fn that makes all the ixns given Rent
+// what to call them? uh...
+// init ixn, init ixn, init
+
+// need to pass rent for mint and stake
+
 /// Creates an `Initialize` instruction, plus helper instruction(s).
-pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) -> Vec<Instruction> {
+pub fn initialize(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    payer: &Pubkey,
+    rent: &Rent,
+) -> Vec<Instruction> {
+    let (stake_address, _) = crate::find_pool_stake_address(program_id, vote_account);
+    let stake_space = std::mem::size_of::<stake::state::StakeState>();
+    let stake_rent = rent.minimum_balance(stake_space).saturating_add(1);
+
+    let (mint_address, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let mint_space = spl_token::state::Mint::LEN;
+    let mint_rent = rent.minimum_balance(mint_space);
+
     let data = SinglePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(
-            crate::find_pool_stake_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(stake_address, false),
         AccountMeta::new(
             crate::find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
-        AccountMeta::new(
-            crate::find_pool_mint_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(mint_address, false),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(sysvar::stake_history::id(), false),
@@ -128,6 +144,8 @@ pub fn initialize(program_id: &Pubkey, vote_account: &Pubkey, payer: &Pubkey) ->
     ];
 
     vec![
+        system_instruction::transfer(payer, &stake_address, stake_rent),
+        system_instruction::transfer(payer, &mint_address, mint_rent),
         Instruction {
             program_id: *program_id,
             accounts,
