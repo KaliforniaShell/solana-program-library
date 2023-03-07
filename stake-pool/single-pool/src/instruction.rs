@@ -3,7 +3,10 @@
 #![allow(clippy::too_many_arguments)]
 
 use {
-    crate::INITIAL_LAMPORTS,
+    crate::{
+        find_pool_authority_address, find_pool_mint_address, find_pool_stake_address,
+        INITIAL_LAMPORTS,
+    },
     borsh::{BorshDeserialize, BorshSerialize},
     mpl_token_metadata::pda::find_metadata_account,
     solana_program::{
@@ -113,13 +116,13 @@ pub fn initialize(
     payer: &Pubkey,
     rent: &Rent,
 ) -> Vec<Instruction> {
-    let (stake_address, _) = crate::find_pool_stake_address(program_id, vote_account);
+    let (stake_address, _) = find_pool_stake_address(program_id, vote_account);
     let stake_space = std::mem::size_of::<stake::state::StakeState>();
     let stake_rent_plus_one = rent
         .minimum_balance(stake_space)
         .saturating_add(INITIAL_LAMPORTS);
 
-    let (mint_address, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
     let mint_space = spl_token::state::Mint::LEN;
     let mint_rent = rent.minimum_balance(mint_space);
 
@@ -136,18 +139,12 @@ pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Ins
     let data = SinglePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
         AccountMeta::new(
-            crate::find_pool_stake_address(program_id, vote_account).0,
+            find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
-        AccountMeta::new(
-            crate::find_pool_authority_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(
-            crate::find_pool_mint_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(sysvar::stake_history::id(), false),
@@ -164,8 +161,7 @@ pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Ins
     }
 }
 
-// TODO wrapper function that replaces the last 3 params with just wallet, calls this with atat/wallet/wallet?
-/// Creates a `DepositStake` instruction, plus helper instruction(s).
+/// Creates all necessary instructions to deposit stake.
 pub fn deposit_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
@@ -174,7 +170,7 @@ pub fn deposit_stake(
     user_lamport_account: &Pubkey,
     user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
-    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
+    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
 
     vec![
         stake::instruction::authorize(
@@ -216,18 +212,12 @@ pub fn deposit_stake_instruction(
     .unwrap();
 
     let accounts = vec![
-        AccountMeta::new(
-            crate::find_pool_stake_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
         AccountMeta::new_readonly(
-            crate::find_pool_authority_address(program_id, vote_account).0,
+            find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
-        AccountMeta::new(
-            crate::find_pool_mint_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
         AccountMeta::new(*user_stake_account, false),
         AccountMeta::new(*user_token_account, false),
         AccountMeta::new(*user_lamport_account, false),
@@ -244,9 +234,9 @@ pub fn deposit_stake_instruction(
     }
 }
 
-// TODO wrapper which creates the system account ala create_blank_stake_account?
-// ergonomics are tricky because it needs to get the rent amount from somewhere
-/// Creates a `WithdrawStake` instruction, plus helper instruction(s).
+/// Creates all necessary instructions to withdraw stake into a given stake account.
+/// If a new stake account is required, the user should first include `system_instruction::create_account`
+/// with account size `std::mem::size_of::<stake::state::StakeState>()` and owner `stake::program::id()`.
 pub fn withdraw_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
@@ -256,31 +246,7 @@ pub fn withdraw_stake(
     user_token_authority: &Pubkey,
     token_amount: u64,
 ) -> Vec<Instruction> {
-    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let data = SinglePoolInstruction::WithdrawStake {
-        vote_account_address: *vote_account,
-        user_stake_authority: *user_stake_authority,
-        token_amount,
-    }
-    .try_to_vec()
-    .unwrap();
-
-    let accounts = vec![
-        AccountMeta::new(
-            crate::find_pool_stake_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new_readonly(pool_authority, false),
-        AccountMeta::new(
-            crate::find_pool_mint_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(*user_stake_account, false),
-        AccountMeta::new(*user_token_account, false),
-        AccountMeta::new_readonly(sysvar::clock::id(), false),
-        AccountMeta::new_readonly(spl_token::id(), false),
-        AccountMeta::new_readonly(stake::program::id(), false),
-    ];
+    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
 
     vec![
         spl_token::instruction::approve(
@@ -292,16 +258,58 @@ pub fn withdraw_stake(
             token_amount,
         )
         .unwrap(),
-        Instruction {
-            program_id: *program_id,
-            accounts,
-            data,
-        },
+        withdraw_stake_instruction(
+            program_id,
+            vote_account,
+            user_stake_account,
+            user_stake_authority,
+            user_token_account,
+            token_amount,
+        ),
     ]
+}
+
+/// Creates a `WithdrawStake` instruction.
+pub fn withdraw_stake_instruction(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    user_stake_account: &Pubkey,
+    user_stake_authority: &Pubkey,
+    user_token_account: &Pubkey,
+    token_amount: u64,
+) -> Instruction {
+    let data = SinglePoolInstruction::WithdrawStake {
+        vote_account_address: *vote_account,
+        user_stake_authority: *user_stake_authority,
+        token_amount,
+    }
+    .try_to_vec()
+    .unwrap();
+
+    let accounts = vec![
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
+        AccountMeta::new_readonly(
+            find_pool_authority_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new(*user_stake_account, false),
+        AccountMeta::new(*user_token_account, false),
+        AccountMeta::new_readonly(sysvar::clock::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
+        AccountMeta::new_readonly(stake::program::id(), false),
+    ];
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 // TODO maybe have a helper function here that stakes for the user?
 // eg, creates instructions like create_independent_stake_account and delegate_stake_account
+// i havent checked if the stake program itself has helpers for this, but it might be nice
 
 /// Creates a `CreateTokenMetadata` instruction.
 pub fn create_token_metadata(
@@ -309,8 +317,8 @@ pub fn create_token_metadata(
     vote_account: &Pubkey,
     payer: &Pubkey,
 ) -> Instruction {
-    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
+    let (pool_mint, _) = find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
     let data = SinglePoolInstruction::CreateTokenMetadata {
         vote_account_address: *vote_account,
@@ -343,8 +351,8 @@ pub fn update_token_metadata(
     symbol: String,
     uri: String,
 ) -> Instruction {
-    let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let (pool_mint, _) = crate::find_pool_mint_address(program_id, vote_account);
+    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
+    let (pool_mint, _) = find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
     let data = SinglePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
         .try_to_vec()
