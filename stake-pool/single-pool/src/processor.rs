@@ -848,6 +848,13 @@ impl Processor {
             let _ = Mint::unpack_from_slice(&pool_mint_data)?;
         }
 
+        let vote_address_str = vote_account_address.to_string();
+        let token_name = format!(
+            "SPL S-Val Token ({}...{})",
+            &vote_address_str[0..4],
+            &vote_address_str[vote_address_str.len().saturating_sub(4)..vote_address_str.len()],
+        );
+
         let new_metadata_instruction = create_metadata_accounts_v3(
             *mpl_token_metadata_program_info.key,
             *metadata_info.key,
@@ -855,11 +862,7 @@ impl Processor {
             *pool_authority_info.key,
             *payer_info.key,
             *pool_authority_info.key,
-            // XXX TODO FIXME figure out good defaults
-            // symbol and uri maybe are supposed to be ""? i dunno whats ideomatic
-            // name im leaning toward "SPL Single-Pool Token (1234...abcd)"
-            // where the parens surround an abbreviation of the vote account address
-            "SOMETHING EXCITING TO DEBATE".to_string(),
+            token_name,
             "".to_string(),
             "".to_string(),
             None,
