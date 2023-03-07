@@ -76,7 +76,7 @@ fn get_active_stake_state(
     match stake_state {
         stake::state::StakeState::Stake(_, stake)
             if stake.delegation.activation_epoch < current_epoch
-                && stake.delegation.activation_epoch == Epoch::MAX =>
+                && stake.delegation.deactivation_epoch == Epoch::MAX =>
         {
             Ok(stake)
         }

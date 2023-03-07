@@ -103,6 +103,7 @@ fn program_test() -> ProgramTest {
         id(),
         processor!(Processor::process),
     );
+    program_test.add_program("mpl_token_metadata", mpl_token_metadata::id(), None);
     program_test.prefer_bpf(false);
     program_test.deactivate_feature(stake_raise_minimum_delegation_to_1_sol::id());
     program_test
@@ -267,7 +268,7 @@ async fn transfer(
     banks_client.process_transaction(transaction).await.unwrap();
 }
 
-// XXX #[tokio::test]
+#[tokio::test]
 async fn initialize_success() {
     let (mut banks_client, payer, recent_blockhash) = program_test().start().await;
     let pool_accounts = PoolAccounts::new();
@@ -285,7 +286,7 @@ async fn initialize_success() {
     assert_eq!(stake_account.owner, stake::program::id());
 }
 
-// XXX #[tokio::test]
+#[tokio::test]
 async fn deposit_withdraw_success() {
     let mut context = program_test().start_with_context().await;
     let pool_accounts = PoolAccounts::new();

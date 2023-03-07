@@ -101,16 +101,11 @@ pub enum SinglePoolInstruction {
     },
 }
 
-// XXX ok for the rent xfer thing jon suggested
-// * fn that just makes the 1 ixn
-// * fn that makes all the ixns given rent numbers
-// * async fn that makes all the ixns given Rent
-// what to call them? uh...
-// init ixn, init ixn, init
-
-// need to pass rent for mint and stake
-
-/// Creates an `Initialize` instruction, plus helper instruction(s).
+// XXX we can bikeshed names of single-instruction vs "batteries included" helper functions
+// but i like making the latter the implicit default... instruction::initialize_instruction looks stupid tho idk
+// maybe that could be instruction::initialize but this could be instructions::initialize?
+// i dont want to just arbitrarily define a new convention tho
+/// Creates all necessary instructions to initialize the pool.
 pub fn initialize(
     program_id: &Pubkey,
     vote_account: &Pubkey,
@@ -119,21 +114,37 @@ pub fn initialize(
 ) -> Vec<Instruction> {
     let (stake_address, _) = crate::find_pool_stake_address(program_id, vote_account);
     let stake_space = std::mem::size_of::<stake::state::StakeState>();
-    let stake_rent = rent.minimum_balance(stake_space).saturating_add(1);
+    let stake_rent_plus_one = rent.minimum_balance(stake_space).saturating_add(1);
 
     let (mint_address, _) = crate::find_pool_mint_address(program_id, vote_account);
     let mint_space = spl_token::state::Mint::LEN;
     let mint_rent = rent.minimum_balance(mint_space);
 
+    vec![
+        system_instruction::transfer(payer, &stake_address, stake_rent_plus_one),
+        system_instruction::transfer(payer, &mint_address, mint_rent),
+        initialize_instruction(program_id, vote_account),
+        create_token_metadata(program_id, vote_account, payer),
+    ]
+}
+
+/// Creates an `Initialize` instruction.
+pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Instruction {
     let data = SinglePoolInstruction::Initialize.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
-        AccountMeta::new(stake_address, false),
+        AccountMeta::new(
+            crate::find_pool_stake_address(program_id, vote_account).0,
+            false,
+        ),
         AccountMeta::new(
             crate::find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
-        AccountMeta::new(mint_address, false),
+        AccountMeta::new(
+            crate::find_pool_mint_address(program_id, vote_account).0,
+            false,
+        ),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(sysvar::stake_history::id(), false),
@@ -143,16 +154,11 @@ pub fn initialize(
         AccountMeta::new_readonly(stake::program::id(), false),
     ];
 
-    vec![
-        system_instruction::transfer(payer, &stake_address, stake_rent),
-        system_instruction::transfer(payer, &mint_address, mint_rent),
-        Instruction {
-            program_id: *program_id,
-            accounts,
-            data,
-        },
-        create_token_metadata(program_id, vote_account, payer),
-    ]
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 // TODO wrapper function that replaces the last 3 params with just wallet, calls this with atat/wallet/wallet?
@@ -166,30 +172,6 @@ pub fn deposit_stake(
     user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
     let (pool_authority, _) = crate::find_pool_authority_address(program_id, vote_account);
-    let data = SinglePoolInstruction::DepositStake {
-        vote_account_address: *vote_account,
-    }
-    .try_to_vec()
-    .unwrap();
-
-    let accounts = vec![
-        AccountMeta::new(
-            crate::find_pool_stake_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new_readonly(pool_authority, false),
-        AccountMeta::new(
-            crate::find_pool_mint_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(*user_stake_account, false),
-        AccountMeta::new(*user_token_account, false),
-        AccountMeta::new(*user_lamport_account, false),
-        AccountMeta::new_readonly(sysvar::clock::id(), false),
-        AccountMeta::new_readonly(sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(spl_token::id(), false),
-        AccountMeta::new_readonly(stake::program::id(), false),
-    ];
 
     vec![
         stake::instruction::authorize(
@@ -206,12 +188,57 @@ pub fn deposit_stake(
             stake::state::StakeAuthorize::Withdrawer,
             None,
         ),
-        Instruction {
-            program_id: *program_id,
-            accounts,
-            data,
-        },
+        deposit_stake_instruction(
+            program_id,
+            vote_account,
+            user_stake_account,
+            user_token_account,
+            user_lamport_account,
+        ),
     ]
+}
+
+/// Creates a `DepositStake` instruction.
+pub fn deposit_stake_instruction(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    user_stake_account: &Pubkey,
+    user_token_account: &Pubkey,
+    user_lamport_account: &Pubkey,
+) -> Instruction {
+    let data = SinglePoolInstruction::DepositStake {
+        vote_account_address: *vote_account,
+    }
+    .try_to_vec()
+    .unwrap();
+
+    let accounts = vec![
+        AccountMeta::new(
+            crate::find_pool_stake_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new_readonly(
+            crate::find_pool_authority_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(
+            crate::find_pool_mint_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(*user_stake_account, false),
+        AccountMeta::new(*user_token_account, false),
+        AccountMeta::new(*user_lamport_account, false),
+        AccountMeta::new_readonly(sysvar::clock::id(), false),
+        AccountMeta::new_readonly(sysvar::stake_history::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
+        AccountMeta::new_readonly(stake::program::id(), false),
+    ];
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
 }
 
 // TODO wrapper which creates the system account ala create_blank_stake_account?
