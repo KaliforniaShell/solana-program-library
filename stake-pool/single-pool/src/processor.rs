@@ -497,11 +497,7 @@ impl Processor {
         ];
         let mint_signers = &[&mint_seeds[..]];
 
-        // TODO clean up comments to have Official Voice, i wrote them like this when this was a poc
-        // we can create the mint and stake in separate instructions
-        // i just like it this way because no account validation required lol
-
-        // create the pool mint
+        // create the pool mint. user has already transferred in rent
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
         if pool_mint_info.lamports() != mint_rent {
@@ -536,7 +532,7 @@ impl Processor {
             authority_signers,
         )?;
 
-        // create the pool stake account
+        // create the pool stake account. user has alread transferred in rent plus the minimum
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
         let stake_rent_plus_initial = rent
             .minimum_balance(stake_space)
@@ -571,7 +567,7 @@ impl Processor {
             authority_signers,
         )?;
 
-        // delegate the stake so it activates
+        // delegate stake so it activates
         invoke_signed(
             &stake::instruction::delegate_stake(
                 pool_stake_info.key,
@@ -621,6 +617,7 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
+        // we enforce that our stake is active so depositing/withdrawing during the warmup epoch is impossible
         let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
             .delegation
             .stake;
@@ -635,11 +632,8 @@ impl Processor {
             .checked_sub(pre_user_stake)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
-        // we have no deposit authority, so we dont need to call stake_authorize
-        // user should set both authorities to pool_authority_info
-        // the merge succeeding implicitly validates all properties of the user stake account
-
         // merge the user stake account, which is preauthed to us, into the pool stake account
+        // this merge succeeding implicitly validates authority/lockup of the user stake account
         Self::stake_merge(
             vote_account_address,
             user_stake_info.clone(),
@@ -657,37 +651,44 @@ impl Processor {
         let post_pool_lamports = pool_stake_info.lamports();
         msg!("Stake post merge {}", post_pool_stake);
 
+        // all lamports added, as a lamport difference, both stake and excess rent
         let lamports_added = post_pool_lamports
             .checked_sub(pre_pool_lamports)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
+        // stake lamports added, as a stake difference
         let stake_added = post_pool_stake
             .checked_sub(pre_pool_stake)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
+        // excess rent, as all lamports less stake
         let leftover_rent = lamports_added
             .checked_sub(stake_added)
             .ok_or(SinglePoolError::ArithmeticUnderflow)?;
 
+        // sanity check: our calculated new stake matches the user prior stake
         if stake_added != pre_user_stake {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
+        // sanity check: our calculated excess rent matches the user prior rent
         if leftover_rent != user_unstaked_lamports {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
+        // sanity check: the user stake account is empty
         if user_stake_info.lamports() != 0 {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
-        // we add initial lamports to make the math work without minting tokens to incinerator
+        // we add initial lamports to supply to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
             pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
+        // deposit amount is determined off stake because we return excess rent
         let new_pool_tokens = calculate_deposit_amount(token_supply, pre_pool_stake, stake_added)
             .ok_or(SinglePoolError::UnexpectedMathError)?;
 
@@ -695,7 +696,7 @@ impl Processor {
             return Err(SinglePoolError::DepositTooSmall.into());
         }
 
-        // mint tokens to the user corresponding to their deposit
+        // mint tokens to the user corresponding to their stake deposit
         Self::token_mint_to(
             vote_account_address,
             token_program_info.clone(),
@@ -706,7 +707,7 @@ impl Processor {
             new_pool_tokens,
         )?;
 
-        // return the lamports their stake account used to contain for rent-exemption
+        // return the lamports their stake account previously held for rent-exemption
         Self::stake_withdraw(
             vote_account_address,
             pool_stake_info.clone(),
@@ -751,18 +752,20 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
+        // we enforce that our stake is active so depositing/withdrawing during the warmup epoch is impossible
         let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
             .delegation
             .stake;
         msg!("Stake pre split {}", pre_pool_stake);
 
-        // we add initial lamports to make the math work without minting tokens to incinerator
+        // we add initial lamports to supply to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
             pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
+        // withdraw amount is determined off stake just like deposit amount
         let withdraw_stake = calculate_withdraw_amount(token_supply, pre_pool_stake, token_amount)
             .ok_or(SinglePoolError::UnexpectedMathError)?;
 
@@ -924,9 +927,10 @@ impl Processor {
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
-        // XXX can vote program own other types of accounts? do i need to do further validation?
-        // XXX one thing i very do not understand is how the legacy accounts can have the enum bytes...?
-        // or was the versions enum in from the very beginning? i guess thats the only way
+        // XXX can vote program own other types of accounts? do i need to do any further validation?
+        // XXX has the versions enum *always* existed? ie no accounts exist without it?
+        // i havent seen a V0_23_5 in the wild to confirm the tag bytes are always there
+        // but based on reading the parse routines in monorepo, it *only* parses through the enum
         let vote_account_data = &vote_account_info.try_borrow_data()?;
         let state_variant = vote_account_data
             .get(..VOTE_STATE_START)
@@ -939,6 +943,9 @@ impl Processor {
             _ => return Err(SinglePoolError::UnparseableVoteAccount.into()),
         };
 
+        // we use authorized_withdrawer to authenticate the caller controls the vote account
+        // this is safer than using an authorized_voter since those keys live hot
+        // and validator-operators we spoke with indicated this would be their preference as well
         let vote_account_withdrawer = &vote_account_data
             .get(withdrawer_start..withdrawer_end)
             .map(Pubkey::new)
