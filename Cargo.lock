@@ -6353,9 +6353,7 @@ dependencies = [
  "solana-sdk",
  "solana-vote-program",
  "spl-associated-token-account 1.1.2",
- "spl-math",
  "spl-token 3.5.0",
- "spl-token-2022 0.6.0",
  "test-case",
  "thiserror",
 ]
