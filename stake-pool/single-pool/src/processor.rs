@@ -30,7 +30,7 @@ use {
         sysvar::{clock::Clock, Sysvar},
         vote::program as vote_program,
     },
-    spl_token_2022::{extension::StateWithExtensions, state::Mint},
+    spl_token::state::Mint,
 };
 
 /// Calculate pool tokens to mint, given outstanding token supply, pool active stake, and deposit active stake
@@ -455,6 +455,7 @@ impl Processor {
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let rent_info = next_account_info(account_info_iter)?;
+        let rent = &Rent::from_account_info(rent_info)?;
         let clock_info = next_account_info(account_info_iter)?;
         let stake_history_info = next_account_info(account_info_iter)?;
         let stake_config_info = next_account_info(account_info_iter)?;
@@ -495,9 +496,6 @@ impl Processor {
             &[mint_bump_seed],
         ];
         let mint_signers = &[&mint_seeds[..]];
-
-        // change to Rent::get() if i get rid of the invokes that require the AccountInfo
-        let rent = &Rent::from_account_info(rent_info)?;
 
         // TODO clean up comments to have Official Voice, i wrote them like this when this was a poc
         // we can create the mint and stake in separate instructions
@@ -686,8 +684,8 @@ impl Processor {
         // we add initial lamports to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
-            let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply.saturating_add(INITIAL_LAMPORTS)
+            let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
+            pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
         let new_pool_tokens = calculate_deposit_amount(token_supply, pre_pool_stake, stake_added)
@@ -761,8 +759,8 @@ impl Processor {
         // we add initial lamports to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
-            let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply.saturating_add(INITIAL_LAMPORTS)
+            let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
+            pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
         };
 
         let withdraw_stake = calculate_withdraw_amount(token_supply, pre_pool_stake, token_amount)
@@ -845,10 +843,9 @@ impl Processor {
         }
 
         // checking the mint exists confirms pool is initialized
-        // TODO put this in a utility function? do something smarter/simpler? maybe just check the first n bytes?
         {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
-            let _ = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
+            let _ = Mint::unpack_from_slice(&pool_mint_data)?;
         }
 
         let new_metadata_instruction = create_metadata_accounts_v3(
