@@ -588,8 +588,6 @@ impl Processor {
             authority_signers,
         )?;
 
-        // could mint the token here if we wanted, either to user or incinerator
-
         Ok(())
     }
 
@@ -682,10 +680,11 @@ impl Processor {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
+        // we add one to the token supply to account for the initialization lamport
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply
+            pool_mint.base.supply.saturating_add(1)
         };
 
         let new_pool_tokens = calculate_deposit_amount(token_supply, pre_pool_stake, stake_added)
@@ -756,10 +755,11 @@ impl Processor {
             .stake;
         msg!("Stake pre split {}", pre_pool_stake);
 
+        // we add one to the token supply to account for the initialization lamport
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = StateWithExtensions::<Mint>::unpack(&pool_mint_data)?;
-            pool_mint.base.supply
+            pool_mint.base.supply.saturating_add(1)
         };
 
         let withdraw_stake = calculate_withdraw_amount(token_supply, pre_pool_stake, token_amount)
@@ -768,10 +768,6 @@ impl Processor {
         if withdraw_stake == 0 {
             return Err(SinglePoolError::WithdrawalTooSmall.into());
         }
-
-        // theres a *ton* of housekeeping in process_withdraw_stake that i havent read line by line fully carefully
-        // but its all basically "we have a reserve and n validators and m transient accounts, whence stake?"
-        // here in stupidland we have no need of any of that
 
         // burn user tokens corresponding to the amount of stake they wish to withdraw
         Self::token_burn(
@@ -804,6 +800,11 @@ impl Processor {
             clock_info.clone(),
             stake_program_info.clone(),
         )?;
+
+        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
+            .delegation
+            .stake;
+        msg!("Stake post split {}", post_pool_stake);
 
         Ok(())
     }
