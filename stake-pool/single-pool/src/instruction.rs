@@ -26,7 +26,7 @@ pub enum SinglePoolInstruction {
     ///
     ///   0. `[]` Validator vote account
     ///   1. `[w]` Pool stake account
-    ///   2. `[w]` Pool authority
+    ///   2. `[]` Pool authority
     ///   3. `[w]` Pool token mint
     ///   4. `[]` Rent sysvar
     ///   5. `[]` Clock sysvar
@@ -140,7 +140,7 @@ pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Ins
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
         AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
-        AccountMeta::new(
+        AccountMeta::new_readonly(
             find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
