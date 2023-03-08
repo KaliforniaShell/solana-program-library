@@ -69,7 +69,7 @@ pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EnvBuilder {
     SinglePool,
-    SinglePoolLegacy,
+    SinglePoolLegacyVote,
     MultiPool,
     MultiPoolToken22,
 }
@@ -77,7 +77,7 @@ impl EnvBuilder {
     pub fn env(self) -> Env {
         match self {
             EnvBuilder::SinglePool => Env::SinglePool(SinglePoolAccounts::default()),
-            EnvBuilder::SinglePoolLegacy => Env::SinglePool(SinglePoolAccounts {
+            EnvBuilder::SinglePoolLegacyVote => Env::SinglePool(SinglePoolAccounts {
                 legacy_vote: true,
                 ..SinglePoolAccounts::default()
             }),
@@ -169,15 +169,7 @@ impl Env {
     pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
         match self {
             Env::SinglePool(accounts) => accounts.initialize(context).await,
-            Env::MultiPool(accounts) => {
-                accounts
-                    .initialize(
-                        &mut context.banks_client,
-                        &context.payer,
-                        &context.last_blockhash,
-                    )
-                    .await
-            }
+            Env::MultiPool(accounts) => accounts.initialize(context).await,
         }
     }
 }

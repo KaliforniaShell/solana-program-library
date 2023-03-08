@@ -60,7 +60,7 @@ async fn setup(env: &Env) -> ProgramTestContext {
 }
 
 #[test_case(EnvBuilder::SinglePool.env() ; "single-pool")]
-#[test_case(EnvBuilder::SinglePoolLegacy.env() ; "single-pool-legacy")]
+#[test_case(EnvBuilder::SinglePoolLegacyVote.env() ; "single-pool-legacy-vote")]
 #[test_case(EnvBuilder::MultiPool.env() ; "multi-pool")]
 //#[test_case(EnvBuilder::MultiPoolToken22.env() ; "multi-pool token22")] enable once metaplex supports token-2022
 #[tokio::test]

@@ -69,16 +69,11 @@ pub struct MultiPoolAccounts {
     pub reserve_lamports: u64,
 }
 impl MultiPoolAccounts {
-    pub async fn initialize(
-        &self,
-        banks_client: &mut BanksClient,
-        payer: &Keypair,
-        recent_blockhash: &Hash,
-    ) -> Result<(), TransportError> {
+    pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
         create_mint(
-            banks_client,
-            payer,
-            recent_blockhash,
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
             &self.token_program_id,
             &self.pool_mint,
             &self.withdraw_authority,
@@ -88,9 +83,9 @@ impl MultiPoolAccounts {
         .await?;
 
         create_token_account(
-            banks_client,
-            payer,
-            recent_blockhash,
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
             &self.token_program_id,
             &self.pool_fee_account,
             &self.pool_mint.pubkey(),
@@ -100,9 +95,9 @@ impl MultiPoolAccounts {
         .await?;
 
         create_independent_stake_account(
-            banks_client,
-            payer,
-            recent_blockhash,
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
             &self.reserve_stake,
             &stake::state::Authorized {
                 staker: self.withdraw_authority,
@@ -114,9 +109,9 @@ impl MultiPoolAccounts {
         .await;
 
         create_stake_pool(
-            banks_client,
-            payer,
-            recent_blockhash,
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
             &self.stake_pool,
             &self.validator_list,
             &self.reserve_stake.pubkey(),
