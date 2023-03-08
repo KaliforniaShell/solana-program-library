@@ -48,21 +48,7 @@ pub use vote_legacy::*;
 pub mod token;
 pub use token::*;
 
-// XXX TODO FIXME i need to ask jon about how to build shit for this shit
-// rn i am just running cargo build-sbf on the toplevel and hoping that fixes it locally
-// but that doesnt work for ci. i might have to write a script like in token-program-test
-// but where the hell does mpl metadata come from?
-// thread 'success::single_pool' panicked at 'Program file data not available for mpl_token_metadata (metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s)', /home/hana/.cargo/registry/src/github.com-1ecc6299db9ec823/solana-program-test-1.14.10/src/lib.rs:680:17
-// actually come to think of it, why do i even need this? arent we just using the processor functions?
-// and if i dont have this, why do the existing tests work??
-
-// XXX copy-paste from initialize.rs
-// two structs, trait with initialize, deposit, withdraw, and maybe some "is everything chill" validation method
-// and then... do i imple stuff like create stake account on it?
-// hmm actually what if instead of a trait i just... impled everything on Env
-// change it to Env maybe. so env.initialize_pool() and so on
-// and it can carry all the logic, impled once or twice as needed. actually this is perfect yea
-// if we need to get any addresses out we have functions for those too. perfect
+// XXX TODO FIXME need a build.rs to ensure all my program bins exist
 
 pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
 
@@ -77,28 +63,19 @@ impl EnvBuilder {
     pub fn env(self) -> Env {
         match self {
             EnvBuilder::SinglePool => Env::SinglePool(SinglePoolAccounts::default()),
+            EnvBuilder::MultiPool => Env::MultiPool(MultiPoolAccounts::default()),
             EnvBuilder::SinglePoolLegacyVote => Env::SinglePool(SinglePoolAccounts {
                 legacy_vote: true,
                 ..SinglePoolAccounts::default()
             }),
-            EnvBuilder::MultiPool | EnvBuilder::MultiPoolToken22 => {
-                Env::MultiPool(MultiPoolAccounts {
-                    token_program_id: self.token_program_id(),
-                    ..Default::default()
-                })
-            }
-        }
-    }
-
-    pub fn token_program_id(&self) -> Pubkey {
-        match self {
-            EnvBuilder::MultiPoolToken22 => spl_token_2022::id(),
-            _ => spl_token::id(),
+            EnvBuilder::MultiPoolToken22 => Env::MultiPool(MultiPoolAccounts {
+                token_program_id: spl_token_2022::id(),
+                ..Default::default()
+            }),
         }
     }
 }
 
-// XXX should i store ProgramTest and stuff on this?
 #[derive(Debug, PartialEq)]
 pub enum Env {
     SinglePool(SinglePoolAccounts),
@@ -136,14 +113,33 @@ impl Env {
         program_test
     }
 
-    /* XXX dunno if i need this
-        pub fn is_multi(&self) -> bool {
-            match self {
-                Env::SinglePool => false,
-                _ => true,
-            }
+    pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
+        match self {
+            Env::SinglePool(accounts) => accounts.initialize(context).await,
+            Env::MultiPool(accounts) => accounts.initialize(context).await,
         }
-    */
+    }
+
+    pub fn unwrap_single(self) -> SinglePoolAccounts {
+        match self {
+            Env::SinglePool(accounts) => accounts,
+            Env::MultiPool(_) => panic!("cannot unwrap_single a MultiPool"),
+        }
+    }
+
+    pub fn unwrap_multi(self) -> MultiPoolAccounts {
+        match self {
+            Env::MultiPool(accounts) => accounts,
+            Env::SinglePool(_) => panic!("cannot unwrap_multi a SinglePool"),
+        }
+    }
+
+    pub fn mint_address(&self) -> Pubkey {
+        match self {
+            Env::SinglePool(accounts) => accounts.mint,
+            Env::MultiPool(accounts) => accounts.pool_mint.pubkey(),
+        }
+    }
 
     pub fn set_deposit_authority(&mut self, stake_deposit_authority: Keypair) {
         match self {
@@ -165,28 +161,7 @@ impl Env {
             }
         }
     }
-
-    pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
-        match self {
-            Env::SinglePool(accounts) => accounts.initialize(context).await,
-            Env::MultiPool(accounts) => accounts.initialize(context).await,
-        }
-    }
 }
-
-// XXX ok im confused about parametrization again
-// * if i do an Accounts trait, and non-generic Env, i impl initialize on the trait
-//   env only exists to produce the accounts
-//   but because i dont return a concrete type i need to work in separate branch arms in tests?
-// * if i do an Accounts trait and generic Env, i can have a generic new()
-//   but then uhh. everything has to be a function on the trait, cant access struct fields
-// * if i make Env a struct that stores the Accounts struct and operates on it internally...
-//   i still need a trait? no, because the Env enum uniquely determines the Accounts type
-//   well, i can use a trait to have Accounts functionality outside Env
-//   but theres no way to return the Accounts directly... unless i have two partial getters i guess?
-//   annoyingly, Keypair doesnt impl Clone tho, so id need to return an Arc or something
-//   oh also theres the question of how to initialize it... can i have function calls in test_case?
-pub trait PoolAccounts {}
 
 pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> SolanaAccount {
     banks_client

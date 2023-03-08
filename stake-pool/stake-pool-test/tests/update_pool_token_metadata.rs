@@ -75,9 +75,21 @@ async fn success_update_pool_token_metadata(env: Env) {
     let puffed_symbol = puffed_out_string(updated_symbol, MAX_SYMBOL_LENGTH);
     let puffed_uri = puffed_out_string(updated_uri, MAX_URI_LENGTH);
 
-    let pool_mint = match env {
+    let (instruction, authorized_withdrawer) = match env {
+        Env::SinglePool(ref stake_pool_accounts) => {
+            let instruction = spool::instruction::update_token_metadata(
+                &spool::id(),
+                &stake_pool_accounts.vote_account.pubkey(),
+                &stake_pool_accounts.validator.pubkey(),
+                updated_name.to_string(),
+                updated_symbol.to_string(),
+                updated_uri.to_string(),
+            );
+
+            (instruction, &stake_pool_accounts.validator)
+        }
         Env::MultiPool(ref stake_pool_accounts) => {
-            let ix = mpool::instruction::update_token_metadata(
+            let instruction = mpool::instruction::update_token_metadata(
                 &mpool::id(),
                 &stake_pool_accounts.stake_pool.pubkey(),
                 &stake_pool_accounts.manager.pubkey(),
@@ -87,49 +99,24 @@ async fn success_update_pool_token_metadata(env: Env) {
                 updated_uri.to_string(),
             );
 
-            let transaction = Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&context.payer.pubkey()),
-                &[&context.payer, &stake_pool_accounts.manager],
-                context.last_blockhash,
-            );
-
-            context
-                .banks_client
-                .process_transaction(transaction)
-                .await
-                .unwrap();
-
-            stake_pool_accounts.pool_mint.pubkey()
-        }
-        Env::SinglePool(ref stake_pool_accounts) => {
-            let ix = spool::instruction::update_token_metadata(
-                &spool::id(),
-                &stake_pool_accounts.vote_account.pubkey(),
-                &stake_pool_accounts.validator.pubkey(),
-                updated_name.to_string(),
-                updated_symbol.to_string(),
-                updated_uri.to_string(),
-            );
-
-            let transaction = Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&context.payer.pubkey()),
-                &[&context.payer, &stake_pool_accounts.validator],
-                context.last_blockhash,
-            );
-
-            context
-                .banks_client
-                .process_transaction(transaction)
-                .await
-                .unwrap();
-
-            stake_pool_accounts.mint
+            (instruction, &stake_pool_accounts.manager)
         }
     };
 
-    let metadata = get_metadata_account(&mut context.banks_client, &pool_mint).await;
+    let transaction = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, authorized_withdrawer],
+        context.last_blockhash,
+    );
+
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
+
+    let metadata = get_metadata_account(&mut context.banks_client, &env.mint_address()).await;
 
     assert_eq!(metadata.data.name, puffed_name);
     assert_eq!(metadata.data.symbol, puffed_symbol);

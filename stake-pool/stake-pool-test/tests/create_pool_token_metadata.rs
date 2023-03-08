@@ -16,8 +16,9 @@ use {
         transaction::{Transaction, TransactionError},
     },
     spl_stake_pool::{
+        self as mpool,
         error::StakePoolError::{AlreadyInUse, SignatureMissing, WrongManager},
-        instruction, MINIMUM_RESERVE_LAMPORTS,
+        MINIMUM_RESERVE_LAMPORTS,
     },
     test_case::test_case,
 };
@@ -58,42 +59,35 @@ fn assert_metadata(env: &Env, metadata: &Metadata) {
 async fn success(env: Env) {
     let mut context = setup(&env).await;
 
-    // FIXME jon is right, a trait would be better
-    // TODO import as mpool so we do mpool::instruction
-    let pool_mint = match env {
-        Env::MultiPool(ref stake_pool_accounts) => {
-            let ix = instruction::create_token_metadata(
-                &spl_stake_pool::id(),
-                &stake_pool_accounts.stake_pool.pubkey(),
-                &stake_pool_accounts.manager.pubkey(),
-                &stake_pool_accounts.pool_mint.pubkey(),
-                &context.payer.pubkey(),
-                MULTI_NAME.to_string(),
-                MULTI_SYMBOL.to_string(),
-                MULTI_URI.to_string(),
-            );
+    if let Env::MultiPool(ref stake_pool_accounts) = env {
+        let ix = mpool::instruction::create_token_metadata(
+            &spl_stake_pool::id(),
+            &stake_pool_accounts.stake_pool.pubkey(),
+            &stake_pool_accounts.manager.pubkey(),
+            &stake_pool_accounts.pool_mint.pubkey(),
+            &context.payer.pubkey(),
+            MULTI_NAME.to_string(),
+            MULTI_SYMBOL.to_string(),
+            MULTI_URI.to_string(),
+        );
 
-            let transaction = Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&context.payer.pubkey()),
-                &[&context.payer, &stake_pool_accounts.manager],
-                context.last_blockhash,
-            );
+        let transaction = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &stake_pool_accounts.manager],
+            context.last_blockhash,
+        );
 
-            context
-                .banks_client
-                .process_transaction(transaction)
-                .await
-                .unwrap();
-
-            stake_pool_accounts.pool_mint.pubkey()
-        }
-        Env::SinglePool(ref stake_pool_accounts) => stake_pool_accounts.mint,
+        context
+            .banks_client
+            .process_transaction(transaction)
+            .await
+            .unwrap();
     };
 
     // single-pool metadata requires no setup by default
 
-    let metadata = get_metadata_account(&mut context.banks_client, &pool_mint).await;
+    let metadata = get_metadata_account(&mut context.banks_client, &env.mint_address()).await;
     assert_metadata(&env, &metadata);
 }
 
