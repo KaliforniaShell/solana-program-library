@@ -2,8 +2,7 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
-    crate::multi_pool::*,
-    crate::single_pool::*,
+    crate::{multi_pool::MultiPoolAccounts, single_pool::SinglePoolAccounts},
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
@@ -50,6 +49,7 @@ pub use token::*;
 
 // XXX TODO FIXME need a build.rs to ensure all my program bins exist
 
+pub const FIRST_NORMAL_EPOCH: u64 = 15;
 pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -171,19 +171,25 @@ pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> Sol
         .expect("account not found")
 }
 
-pub async fn create_vote(context: &mut ProgramTestContext, validator: &Keypair, vote: &Keypair) {
-    let rent = context.banks_client.get_rent().await.unwrap();
+pub async fn create_vote(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    validator: &Keypair,
+    vote: &Keypair,
+) {
+    let rent = banks_client.get_rent().await.unwrap();
     let rent_voter = rent.minimum_balance(VoteState::size_of());
 
     let mut instructions = vec![system_instruction::create_account(
-        &context.payer.pubkey(),
+        &payer.pubkey(),
         &validator.pubkey(),
         rent.minimum_balance(0),
         0,
         &system_program::id(),
     )];
     instructions.append(&mut vote_instruction::create_account(
-        &context.payer.pubkey(),
+        &payer.pubkey(),
         &vote.pubkey(),
         &VoteInit {
             node_pubkey: validator.pubkey(),
@@ -196,15 +202,11 @@ pub async fn create_vote(context: &mut ProgramTestContext, validator: &Keypair, 
 
     let transaction = Transaction::new_signed_with_payer(
         &instructions,
-        Some(&context.payer.pubkey()),
-        &[validator, vote, &context.payer],
-        context.last_blockhash,
+        Some(&payer.pubkey()),
+        &[validator, vote, payer],
+        *recent_blockhash,
     );
-    context
-        .banks_client
-        .process_transaction(transaction)
-        .await
-        .unwrap();
+    banks_client.process_transaction(transaction).await.unwrap();
 }
 
 pub async fn create_independent_stake_account(

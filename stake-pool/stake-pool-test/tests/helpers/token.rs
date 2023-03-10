@@ -230,6 +230,18 @@ pub async fn create_ata(
         .map_err(|e| e.into())
 }
 
+pub async fn get_token_balance(banks_client: &mut BanksClient, token: &Pubkey) -> u64 {
+    let token_account = banks_client.get_account(*token).await.unwrap().unwrap();
+    let account_info = StateWithExtensionsOwned::<Account>::unpack(token_account.data).unwrap();
+    account_info.base.amount
+}
+
+pub async fn get_token_supply(banks_client: &mut BanksClient, mint: &Pubkey) -> u64 {
+    let mint_account = banks_client.get_account(*mint).await.unwrap().unwrap();
+    let account_info = StateWithExtensionsOwned::<Mint>::unpack(mint_account.data).unwrap();
+    account_info.base.supply
+}
+
 pub async fn get_metadata_account(banks_client: &mut BanksClient, token_mint: &Pubkey) -> Metadata {
     let (token_metadata, _) = find_metadata_account(token_mint);
     let token_metadata_account = banks_client

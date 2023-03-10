@@ -38,7 +38,6 @@ use {
 #[tokio::test]
 async fn success(env: Env) {
     let mut context = env.program_test().start_with_context().await;
-
     env.initialize(&mut context).await.unwrap();
 
     match env {

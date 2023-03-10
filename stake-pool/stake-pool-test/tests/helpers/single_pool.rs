@@ -56,7 +56,14 @@ impl SinglePoolAccounts {
         if self.legacy_vote {
             create_vote_legacy(context, &self.validator, &self.vote_account).await;
         } else {
-            create_vote(context, &self.validator, &self.vote_account).await;
+            create_vote(
+                &mut context.banks_client,
+                &context.payer,
+                &context.last_blockhash,
+                &self.validator,
+                &self.vote_account,
+            )
+            .await;
         }
 
         let rent = context.banks_client.get_rent().await.unwrap();
