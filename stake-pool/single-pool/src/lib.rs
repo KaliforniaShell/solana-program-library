@@ -28,16 +28,6 @@ const INITIAL_LAMPORTS: u64 = 1;
 const VOTE_STATE_START: usize = 4;
 const VOTE_STATE_END: usize = 36;
 
-// authorized withdrawer starts at:
-//    4 (enum tag)
-// + 32 (node_pubkey)
-// + 32 (authorized_voter)
-// +  8 (authorized_voter_epoch)
-// + (32 + 8 * 3) * 32 + 8 (prior_voters)
-// = 1876
-const LEGACY_VOTE_STATE_START: usize = 1876;
-const LEGACY_VOTE_STATE_END: usize = 1908;
-
 fn find_address(program_id: &Pubkey, vote_account_address: &Pubkey, prefix: &[u8]) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[prefix, vote_account_address.as_ref()], program_id)
 }
@@ -58,11 +48,4 @@ pub fn find_pool_authority_address(
 /// Find the canonical token mint address for a given vote account.
 pub fn find_pool_mint_address(program_id: &Pubkey, vote_account_address: &Pubkey) -> (Pubkey, u8) {
     find_address(program_id, vote_account_address, POOL_MINT_PREFIX)
-}
-
-#[allow(missing_docs)]
-/// Internal constants confined to a suggestively named submodule for use in tests.
-pub mod test_variable {
-    pub const LEGACY_VOTE_STATE_START: usize = super::LEGACY_VOTE_STATE_START;
-    pub const LEGACY_VOTE_STATE_END: usize = super::LEGACY_VOTE_STATE_END;
 }

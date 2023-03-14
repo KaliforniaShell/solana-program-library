@@ -3,8 +3,8 @@
 use {
     crate::{
         error::SinglePoolError, instruction::SinglePoolInstruction, INITIAL_LAMPORTS,
-        LEGACY_VOTE_STATE_END, LEGACY_VOTE_STATE_START, MINT_DECIMALS, POOL_AUTHORITY_PREFIX,
-        POOL_MINT_PREFIX, POOL_STAKE_PREFIX, VOTE_STATE_END, VOTE_STATE_START,
+        MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX, VOTE_STATE_END,
+        VOTE_STATE_START,
     },
     borsh::BorshDeserialize,
     mpl_token_metadata::{
@@ -928,30 +928,25 @@ impl Processor {
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
 
         // XXX can vote program own other types of accounts? do i need to do any further validation?
-        // XXX has the versions enum *always* existed? ie no accounts exist without it?
-        // i havent seen a V0_23_5 in the wild to confirm the tag bytes are always there
-        // but based on reading the parse routines in monorepo, it *only* parses through the enum
         let vote_account_data = &vote_account_info.try_borrow_data()?;
         let state_variant = vote_account_data
             .get(..VOTE_STATE_START)
             .and_then(|s| s.try_into().ok())
             .ok_or(SinglePoolError::UnparseableVoteAccount)?;
 
-        let (withdrawer_start, withdrawer_end) = match u32::from_le_bytes(state_variant) {
-            0 => (LEGACY_VOTE_STATE_START, LEGACY_VOTE_STATE_END),
-            1 => (VOTE_STATE_START, VOTE_STATE_END),
-            _ => return Err(SinglePoolError::UnparseableVoteAccount.into()),
-        };
-
         // we use authorized_withdrawer to authenticate the caller controls the vote account
         // this is safer than using an authorized_voter since those keys live hot
         // and validator-operators we spoke with indicated this would be their preference as well
-        let vote_account_withdrawer = &vote_account_data
-            .get(withdrawer_start..withdrawer_end)
-            .map(Pubkey::new)
-            .ok_or(SinglePoolError::UnparseableVoteAccount)?;
+        let vote_account_withdrawer = match u32::from_le_bytes(state_variant) {
+            1 => vote_account_data
+                .get(VOTE_STATE_START..VOTE_STATE_END)
+                .map(Pubkey::new)
+                .ok_or(SinglePoolError::UnparseableVoteAccount),
+            0 => Err(SinglePoolError::LegacyVoteAccount),
+            _ => Err(SinglePoolError::UnparseableVoteAccount),
+        }?;
 
-        if authorized_withdrawer_info.key != vote_account_withdrawer {
+        if *authorized_withdrawer_info.key != vote_account_withdrawer {
             msg!("Vote account authorized withdrawer does not match the account provided.");
             return Err(SinglePoolError::InvalidMetadataSigner.into());
         }
@@ -1072,6 +1067,8 @@ impl PrintProgramError for SinglePoolError {
                 msg!("Error: A calculation failed unexpectedly. \
                      (This error should never be surfaced; it stands in for failure conditions that should never be reached.)"),
             SinglePoolError::UnparseableVoteAccount => msg!("Error: Failed to parse vote account."),
+            SinglePoolError::LegacyVoteAccount =>
+                msg!("Error: The V0_23_5 vote account type is unsupported and should be upgraded via `convert_to_current()`."),
             SinglePoolError::WrongRentAmount =>
                 msg!("Error: Incorrect number of lamports provided for rent-exemption when initializing."),
         }

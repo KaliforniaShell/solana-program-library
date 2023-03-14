@@ -34,10 +34,15 @@ use {
         },
     },
     spl_associated_token_account as atoken, spl_stake_pool as mpool,
-    spl_stake_single_pool::test_variable,
     spl_token_2022::extension::{ExtensionType, StateWithExtensionsOwned},
     std::{collections::VecDeque, convert::TryInto, num::NonZeroU32},
 };
+
+// XXX TODO FIXME remove this file and all usage of it
+// jon informed me the legacy account type is upgraded by routine usage so we dont need to support
+// but i want to handle the program code review before i mess with tests
+const LEGACY_VOTE_STATE_START: usize = 1876;
+const LEGACY_VOTE_STATE_END: usize = 1908;
 
 // structs are mostly copy-pasted from vote_state_0_23_5.rs, a private module
 
@@ -134,8 +139,8 @@ fn test_legacy_offset() {
     for i in 0..(buf.len() - 32) {
         let pubkey = Pubkey::new(&buf[i..(i + 32)]);
         if pubkey == authorized_withdrawer {
-            assert_eq!(i, test_variable::LEGACY_VOTE_STATE_START);
-            assert_eq!(i + 32, test_variable::LEGACY_VOTE_STATE_END);
+            assert_eq!(i, LEGACY_VOTE_STATE_START);
+            assert_eq!(i + 32, LEGACY_VOTE_STATE_END);
             found_withdrawer = true;
             break;
         }

@@ -48,6 +48,9 @@ pub enum SinglePoolError {
     /// (This error should never be surfaced; it stands in for failure conditions that should never be reached.)
     #[error("UnexpectedMathError")]
     UnexpectedMathError,
+    /// The V0_23_5 vote account type is unsupported and should be upgraded via `convert_to_current()`.
+    #[error("LegacyVoteAccount")]
+    LegacyVoteAccount,
     /// Failed to parse vote account.
     #[error("UnparseableVoteAccount")]
     UnparseableVoteAccount,
