@@ -64,6 +64,9 @@ fn calculate_withdraw_amount(
     }
 }
 
+// FIXME sleep on whether to undo the "active" change i made to the original version of this function
+// im 70% sure i did it only because the extra functionality was unnecessary
+// rather than guarding against any behavior that is truly unwanted
 /// Deserialize the stake state from AccountInfo
 fn get_active_stake_state(
     stake_account_info: &AccountInfo,
@@ -243,7 +246,6 @@ impl Processor {
         destination_account: AccountInfo<'a>,
         clock: AccountInfo<'a>,
         stake_history: AccountInfo<'a>,
-        stake_program_info: AccountInfo<'a>,
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
@@ -261,7 +263,6 @@ impl Processor {
                 clock,
                 stake_history,
                 authority,
-                stake_program_info,
             ],
             signers,
         )
@@ -300,7 +301,6 @@ impl Processor {
         bump_seed: u8,
         new_stake_authority: &Pubkey,
         clock: AccountInfo<'a>,
-        stake_program_info: AccountInfo<'a>,
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
@@ -323,7 +323,6 @@ impl Processor {
                 stake_account.clone(),
                 clock.clone(),
                 stake_authority.clone(),
-                stake_program_info.clone(),
             ],
             signers,
         )?;
@@ -337,7 +336,7 @@ impl Processor {
         );
         invoke_signed(
             &authorize_instruction,
-            &[stake_account, clock, stake_authority, stake_program_info],
+            &[stake_account, clock, stake_authority],
             signers,
         )
     }
@@ -351,7 +350,6 @@ impl Processor {
         destination_account: AccountInfo<'a>,
         clock: AccountInfo<'a>,
         stake_history: AccountInfo<'a>,
-        stake_program_info: AccountInfo<'a>,
         lamports: u64,
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
@@ -377,7 +375,6 @@ impl Processor {
                 clock,
                 stake_history,
                 stake_authority,
-                stake_program_info,
             ],
             signers,
         )
@@ -409,7 +406,7 @@ impl Processor {
             amount,
         )?;
 
-        invoke_signed(&ix, &[mint, destination, authority, token_program], signers)
+        invoke_signed(&ix, &[mint, destination, authority], signers)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -438,14 +435,9 @@ impl Processor {
             amount,
         )?;
 
-        invoke_signed(
-            &ix,
-            &[burn_account, mint, authority, token_program],
-            signers,
-        )
+        invoke_signed(&ix, &[burn_account, mint, authority], signers)
     }
 
-    #[inline(never)] // needed due to stack size violation
     fn process_initialize_mint(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let validator_vote_info = next_account_info(account_info_iter)?;
@@ -486,19 +478,21 @@ impl Processor {
         // create the pool mint. user has already transferred in rent
         let mint_space = spl_token::state::Mint::LEN;
         let mint_rent = rent.minimum_balance(mint_space);
-        if pool_mint_info.lamports() != mint_rent {
+
+        // TODO remove this after confirming for myself that spl-token doesnt allow creating rentpigs
+        if pool_mint_info.lamports() < mint_rent {
             return Err(SinglePoolError::WrongRentAmount.into());
         }
 
         invoke_signed(
             &system_instruction::allocate(pool_mint_info.key, mint_space as u64),
-            &[pool_mint_info.clone(), system_program_info.clone()],
+            &[pool_mint_info.clone()],
             mint_signers,
         )?;
 
         invoke_signed(
             &system_instruction::assign(pool_mint_info.key, token_program_info.key),
-            &[pool_mint_info.clone(), system_program_info.clone()],
+            &[pool_mint_info.clone()],
             mint_signers,
         )?;
 
@@ -510,18 +504,13 @@ impl Processor {
                 None,
                 MINT_DECIMALS,
             )?,
-            &[
-                pool_mint_info.clone(),
-                rent_info.clone(),
-                system_program_info.clone(),
-            ],
+            &[pool_mint_info.clone(), rent_info.clone()],
             authority_signers,
         )?;
 
         Ok(())
     }
 
-    #[inline(never)] // needed due to stack size violation
     fn process_initialize_stake(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let validator_vote_info = next_account_info(account_info_iter)?;
@@ -571,7 +560,11 @@ impl Processor {
             .minimum_balance(stake_space)
             .saturating_add(minimum_delegation);
 
-        if pool_stake_info.lamports() != stake_rent_plus_initial {
+        // XXX TODO FIXME jon raised the important issue that if we check != someone can dos pool creation
+        // unfortunately, that complicates the token minting, because we undermint if someone overpays
+        // i believe we should be able to load the stake account data after delegation to see the true stake amount
+        // TODO also write a test that overpayment goes smoothly
+        if pool_stake_info.lamports() < stake_rent_plus_initial {
             return Err(SinglePoolError::WrongRentAmount.into());
         }
 
@@ -579,13 +572,13 @@ impl Processor {
 
         invoke_signed(
             &system_instruction::allocate(pool_stake_info.key, stake_space as u64),
-            &[pool_stake_info.clone(), system_program_info.clone()],
+            &[pool_stake_info.clone()],
             stake_signers,
         )?;
 
         invoke_signed(
             &system_instruction::assign(pool_stake_info.key, stake_program_info.key),
-            &[pool_stake_info.clone(), system_program_info.clone()],
+            &[pool_stake_info.clone()],
             stake_signers,
         )?;
 
@@ -621,6 +614,10 @@ impl Processor {
         // mint tokens to the user corresponding to their stake deposit
         // note that this is safe from economic attacks despite the stake being in an activating state
         // because we block anyone else from depositing until it has activated
+        // XXX actually do we give a shit about the activating stake?
+        // theres no economic attack anyway because theres no rewards! right??
+        // TODO reread this part of the stake program (or just test for ourselves actually...) that uh
+        // no weird shit like "merge into activating and then split" can implicitly deactivate...
         Self::token_mint_to(
             validator_vote_info.key,
             token_program_info.clone(),
@@ -634,7 +631,6 @@ impl Processor {
         Ok(())
     }
 
-    #[inline(never)] // needed to avoid stack size violation
     fn process_deposit_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -663,6 +659,10 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
+        if pool_stake_info.key == user_stake_info.key {
+            panic!("error here");
+        }
+
         // we enforce that our stake is active so depositing/withdrawing during the warmup epoch is impossible
         let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
             .delegation
@@ -688,7 +688,6 @@ impl Processor {
             pool_stake_info.clone(),
             clock_info.clone(),
             stake_history_info.clone(),
-            stake_program_info.clone(),
         )?;
 
         let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
@@ -762,14 +761,12 @@ impl Processor {
             user_lamport_account_info.clone(),
             clock_info.clone(),
             stake_history_info.clone(),
-            stake_program_info.clone(),
             leftover_rent,
         )?;
 
         Ok(())
     }
 
-    #[inline(never)] // needed to avoid stack size violation
     fn process_withdraw_stake(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -848,7 +845,6 @@ impl Processor {
             bump_seed,
             user_stake_authority,
             clock_info.clone(),
-            stake_program_info.clone(),
         )?;
 
         let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
@@ -859,9 +855,6 @@ impl Processor {
         Ok(())
     }
 
-    // this is an optional, but typical, part of initialization
-    // we separate it from the initialize instruction so that upstream cannot break us
-    #[inline(never)]
     fn process_create_pool_token_metadata(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -939,7 +932,6 @@ impl Processor {
                 payer_info.clone(),
                 pool_authority_info.clone(),
                 system_program_info.clone(),
-                mpl_token_metadata_program_info.clone(),
             ],
             signers,
         )?;
@@ -947,7 +939,6 @@ impl Processor {
         Ok(())
     }
 
-    #[inline(never)]
     fn process_update_pool_token_metadata(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1029,11 +1020,7 @@ impl Processor {
 
         invoke_signed(
             &update_metadata_accounts_instruction,
-            &[
-                metadata_info.clone(),
-                pool_authority_info.clone(),
-                mpl_token_metadata_program_info.clone(),
-            ],
+            &[metadata_info.clone(), pool_authority_info.clone()],
             signers,
         )?;
 

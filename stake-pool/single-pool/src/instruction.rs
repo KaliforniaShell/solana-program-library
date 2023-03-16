@@ -86,7 +86,8 @@ pub enum SinglePoolInstruction {
 
     ///   Create token metadata for the stake-pool token in the metaplex-token program.
     ///   Step three of the permissionless three-stage initialization flow.
-    ///   Note this instruction is not necessary for the pool to operate, in case of upstream breakage.
+    ///   Note this instruction is not necessary for the pool to operate, to ensure we cannot
+    ///   be broken by upstream.
     ///
     ///   0. `[]` Pool authority
     ///   1. `[]` Pool token mint
