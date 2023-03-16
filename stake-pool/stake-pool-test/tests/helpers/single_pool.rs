@@ -2,7 +2,7 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
-    crate::{create_vote, create_vote_legacy},
+    crate::{create_vote, create_vote_legacy, stake_get_minimum_delegation},
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
@@ -72,6 +72,12 @@ impl SinglePoolAccounts {
             &self.vote_account.pubkey(),
             &context.payer.pubkey(),
             &rent,
+            stake_get_minimum_delegation(
+                &mut context.banks_client,
+                &context.payer,
+                &context.last_blockhash,
+            )
+            .await,
         );
         let message = Message::new(&instructions, Some(&context.payer.pubkey()));
         let transaction = Transaction::new(&[&context.payer], message, context.last_blockhash);

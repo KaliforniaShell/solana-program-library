@@ -22,7 +22,6 @@ const POOL_AUTHORITY_PREFIX: &[u8] = b"authority";
 const POOL_MINT_PREFIX: &[u8] = b"mint";
 
 const MINT_DECIMALS: u8 = 9;
-const INITIAL_LAMPORTS: u64 = 1;
 
 // authorized withdrawer starts immediately after the enum tag
 const VOTE_STATE_START: usize = 4;

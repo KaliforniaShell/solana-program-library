@@ -86,6 +86,7 @@ impl PoolAccounts {
             &self.vote_account.pubkey(),
             &payer.pubkey(),
             &rent,
+            1,
         );
         let message = Message::new(&instructions, Some(&payer.pubkey()));
         let transaction = Transaction::new(&[payer], message, *recent_blockhash);

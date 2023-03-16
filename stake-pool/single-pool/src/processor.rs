@@ -2,8 +2,8 @@
 
 use {
     crate::{
-        error::SinglePoolError, instruction::SinglePoolInstruction, INITIAL_LAMPORTS,
-        MINT_DECIMALS, POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX, VOTE_STATE_END,
+        error::SinglePoolError, instruction::SinglePoolInstruction, MINT_DECIMALS,
+        POOL_AUTHORITY_PREFIX, POOL_MINT_PREFIX, POOL_STAKE_PREFIX, VOTE_STATE_END,
         VOTE_STATE_START,
     },
     borsh::BorshDeserialize,
@@ -567,10 +567,11 @@ impl Processor {
         let authority_signers = &[&authority_seeds[..]];
 
         // create the pool stake account. user has alread transferred in rent plus the minimum
+        let minimum_delegation = stake::tools::get_minimum_delegation()?;
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
         let stake_rent_plus_initial = rent
             .minimum_balance(stake_space)
-            .saturating_add(INITIAL_LAMPORTS);
+            .saturating_add(minimum_delegation);
 
         if pool_stake_info.lamports() != stake_rent_plus_initial {
             return Err(SinglePoolError::WrongRentAmount.into());
@@ -629,7 +630,7 @@ impl Processor {
             user_token_account_info.clone(),
             pool_authority_info.clone(),
             authority_bump_seed,
-            INITIAL_LAMPORTS,
+            minimum_delegation,
         )?;
 
         Ok(())

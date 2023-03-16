@@ -3,10 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use {
-    crate::{
-        find_pool_authority_address, find_pool_mint_address, find_pool_stake_address,
-        INITIAL_LAMPORTS,
-    },
+    crate::{find_pool_authority_address, find_pool_mint_address, find_pool_stake_address},
     borsh::{BorshDeserialize, BorshSerialize},
     mpl_token_metadata::pda::find_metadata_account,
     solana_program::{
@@ -119,22 +116,19 @@ pub enum SinglePoolInstruction {
     },
 }
 
-// XXX we can bikeshed names of single-instruction vs "batteries included" helper functions
-// but i like making the latter the implicit default... instruction::initialize_instruction looks stupid tho idk
-// maybe that could be instruction::initialize but this could be instructions::initialize?
-// i dont want to just arbitrarily define a new convention tho
 /// Creates all necessary instructions to initialize the pool.
 pub fn initialize(
     program_id: &Pubkey,
     vote_account: &Pubkey,
     payer: &Pubkey,
     rent: &Rent,
+    minimum_delegation: u64,
 ) -> Vec<Instruction> {
     let (stake_address, _) = find_pool_stake_address(program_id, vote_account);
     let stake_space = std::mem::size_of::<stake::state::StakeState>();
     let stake_rent_plus_one = rent
         .minimum_balance(stake_space)
-        .saturating_add(INITIAL_LAMPORTS);
+        .saturating_add(minimum_delegation);
 
     let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
     let mint_rent = rent.minimum_balance(spl_token::state::Mint::LEN);

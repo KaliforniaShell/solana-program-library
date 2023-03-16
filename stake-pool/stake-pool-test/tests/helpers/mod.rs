@@ -19,7 +19,7 @@ use {
         account::{Account as SolanaAccount, WritableAccount},
         clock::{Clock, Epoch},
         compute_budget::ComputeBudgetInstruction,
-        feature_set::stake_raise_minimum_delegation_to_1_sol,
+        feature_set::stake_allow_zero_undelegated_amount,
         message::Message,
         signature::{Keypair, Signer},
         transaction::Transaction,
@@ -93,7 +93,7 @@ impl Env {
                     spool::id(),
                     processor!(spool::processor::Processor::process),
                 );
-                program_test.deactivate_feature(stake_raise_minimum_delegation_to_1_sol::id());
+                program_test.deactivate_feature(stake_allow_zero_undelegated_amount::id());
             }
             Env::MultiPool(_) => {
                 program_test.add_program(
@@ -169,6 +169,30 @@ pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> Sol
         .await
         .expect("client error")
         .expect("account not found")
+}
+
+pub async fn stake_get_minimum_delegation(
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+) -> u64 {
+    let transaction = Transaction::new_signed_with_payer(
+        &[stake::instruction::get_minimum_delegation()],
+        Some(&payer.pubkey()),
+        &[payer],
+        *recent_blockhash,
+    );
+    let mut data = banks_client
+        .simulate_transaction(transaction)
+        .await
+        .unwrap()
+        .simulation_details
+        .unwrap()
+        .return_data
+        .unwrap()
+        .data;
+    data.resize(8, 0);
+    data.try_into().map(u64::from_le_bytes).unwrap()
 }
 
 pub async fn create_vote(

@@ -4,7 +4,8 @@
 use {
     crate::{
         create_independent_stake_account, create_mint, create_token_account, create_vote,
-        delegate_stake_account, get_account, get_token_balance, FIRST_NORMAL_EPOCH,
+        delegate_stake_account, get_account, get_token_balance, stake_get_minimum_delegation,
+        FIRST_NORMAL_EPOCH,
     },
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
@@ -1430,30 +1431,6 @@ pub async fn simple_add_validator_to_pool(
     assert!(error.is_none());
 
     validator_stake
-}
-
-pub async fn stake_get_minimum_delegation(
-    banks_client: &mut BanksClient,
-    payer: &Keypair,
-    recent_blockhash: &Hash,
-) -> u64 {
-    let transaction = Transaction::new_signed_with_payer(
-        &[stake::instruction::get_minimum_delegation()],
-        Some(&payer.pubkey()),
-        &[payer],
-        *recent_blockhash,
-    );
-    let mut data = banks_client
-        .simulate_transaction(transaction)
-        .await
-        .unwrap()
-        .simulation_details
-        .unwrap()
-        .return_data
-        .unwrap()
-        .data;
-    data.resize(8, 0);
-    data.try_into().map(u64::from_le_bytes).unwrap()
 }
 
 pub async fn stake_pool_get_minimum_delegation(
