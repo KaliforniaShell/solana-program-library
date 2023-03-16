@@ -30,7 +30,7 @@ use {
         vote_state::{VoteInit, VoteState, VoteStateVersions},
     },
     spl_associated_token_account as atoken,
-    spl_stake_single_pool::{
+    spl_single_validator_pool::{
         self, find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
         instruction,
     },

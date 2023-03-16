@@ -12,15 +12,13 @@ use {
         pda::find_metadata_account,
         state::DataV2,
     },
-    num_traits::FromPrimitive,
     solana_program::{
         account_info::{next_account_info, AccountInfo},
         borsh::try_from_slice_unchecked,
-        decode_error::DecodeError,
         entrypoint::ProgramResult,
         msg,
         program::invoke_signed,
-        program_error::{PrintProgramError, ProgramError},
+        program_error::ProgramError,
         program_pack::Pack,
         pubkey::Pubkey,
         rent::Rent,
@@ -678,7 +676,7 @@ impl Processor {
         let user_unstaked_lamports = user_stake_info
             .lamports()
             .checked_sub(pre_user_stake)
-            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
+            .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
         // merge the user stake account, which is preauthed to us, into the pool stake account
         // this merge succeeding implicitly validates authority/lockup of the user stake account
@@ -702,17 +700,17 @@ impl Processor {
         // all lamports added, as a lamport difference, both stake and excess rent
         let lamports_added = post_pool_lamports
             .checked_sub(pre_pool_lamports)
-            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
+            .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
         // stake lamports added, as a stake difference
         let stake_added = post_pool_stake
             .checked_sub(pre_pool_stake)
-            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
+            .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
         // excess rent, as all lamports less stake
         let leftover_rent = lamports_added
             .checked_sub(stake_added)
-            .ok_or(SinglePoolError::ArithmeticUnderflow)?;
+            .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
         // sanity check: our calculated new stake matches the user prior stake
         if stake_added != pre_user_stake {
@@ -1088,41 +1086,6 @@ impl Processor {
                 msg!("Instruction: UpdateTokenMetadata");
                 Self::process_update_pool_token_metadata(program_id, accounts, name, symbol, uri)
             }
-        }
-    }
-}
-
-impl PrintProgramError for SinglePoolError {
-    fn print<E>(&self)
-    where
-        E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
-    {
-        match self {
-            SinglePoolError::InvalidPoolStakeAccount =>
-                msg!("Error: Provided pool stake account does not match stake account derived for validator vote account."),
-            SinglePoolError::InvalidPoolAuthority =>
-                msg!("Error: Provided pool authority does not match authority derived for validator vote account."),
-            SinglePoolError::InvalidPoolMint =>
-                msg!("Error: Provided pool mint does not match mint derived for validator vote account."),
-            SinglePoolError::InvalidMetadataAccount =>
-                msg!("Error: Provided metadata account does not match metadata account derived for pool mint."),
-            SinglePoolError::InvalidMetadataSigner =>
-                msg!("Error: Authorized withdrawer provided for metadata update does not match the vote account."),
-            SinglePoolError::DepositTooSmall =>
-                msg!("Error: Not enough lamports provided for deposit to result in one pool token."),
-            SinglePoolError::WithdrawalTooSmall =>
-                msg!("Error: Not enough pool tokens provided to withdraw stake worth one lamport."),
-            SinglePoolError::SignatureMissing => msg!("Error: Required signature is missing."),
-            SinglePoolError::WrongStakeState => msg!("Error: Stake account is not in the state expected by the program."),
-            SinglePoolError::ArithmeticUnderflow => msg!("Error: Unsigned subtraction crossed the zero."),
-            SinglePoolError::UnexpectedMathError =>
-                msg!("Error: A calculation failed unexpectedly. \
-                     (This error should never be surfaced; it stands in for failure conditions that should never be reached.)"),
-            SinglePoolError::UnparseableVoteAccount => msg!("Error: Failed to parse vote account."),
-            SinglePoolError::LegacyVoteAccount =>
-                msg!("Error: The V0_23_5 vote account type is unsupported and should be upgraded via `convert_to_current()`."),
-            SinglePoolError::WrongRentAmount =>
-                msg!("Error: Incorrect number of lamports provided for rent-exemption when initializing."),
         }
     }
 }

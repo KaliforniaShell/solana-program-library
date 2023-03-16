@@ -29,8 +29,8 @@ use {
         self, vote_instruction,
         vote_state::{VoteInit, VoteState, VoteStateVersions},
     },
-    spl_associated_token_account as atoken, spl_stake_pool as mpool,
-    spl_stake_single_pool as spool,
+    spl_associated_token_account as atoken, spl_single_validator_pool as spool,
+    spl_stake_pool as mpool,
     spl_token_2022::{
         extension::{ExtensionType, StateWithExtensionsOwned},
         state::{Account, Mint},
@@ -89,7 +89,7 @@ impl Env {
         match self {
             Env::SinglePool(_) => {
                 program_test.add_program(
-                    "spl_stake_single_pool",
+                    "spl_single_validator_pool",
                     spool::id(),
                     processor!(spool::processor::Processor::process),
                 );

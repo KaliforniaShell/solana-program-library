@@ -29,7 +29,7 @@ use {
         vote_state::{VoteInit, VoteState, VoteStateVersions},
     },
     spl_associated_token_account as atoken,
-    spl_stake_single_pool::{
+    spl_single_validator_pool::{
         find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
         processor::Processor,
     },
@@ -81,7 +81,7 @@ impl PoolAccounts {
         .await;
 
         let rent = banks_client.get_rent().await.unwrap();
-        let instructions = spl_stake_single_pool::instruction::initialize(
+        let instructions = spl_single_validator_pool::instruction::initialize(
             &id(),
             &self.vote_account.pubkey(),
             &payer.pubkey(),
@@ -100,7 +100,7 @@ impl PoolAccounts {
 
 fn program_test() -> ProgramTest {
     let mut program_test = ProgramTest::new(
-        "spl_stake_single_pool",
+        "spl_single_validator_pool",
         id(),
         processor!(Processor::process),
     );
@@ -389,7 +389,7 @@ async fn deposit_withdraw_success() {
     let first_normal_slot = context.genesis_config().epoch_schedule.first_normal_slot;
     context.warp_to_slot(first_normal_slot).unwrap();
 
-    let instructions = spl_stake_single_pool::instruction::deposit_stake(
+    let instructions = spl_single_validator_pool::instruction::deposit(
         &id(),
         &pool_accounts.vote_account.pubkey(),
         &user_stake.pubkey(),
@@ -433,7 +433,7 @@ async fn deposit_withdraw_success() {
     )
     .await;
 
-    let instructions = spl_stake_single_pool::instruction::withdraw_stake(
+    let instructions = spl_single_validator_pool::instruction::withdraw(
         &id(),
         &pool_accounts.vote_account.pubkey(),
         &recipient_stake.pubkey(),

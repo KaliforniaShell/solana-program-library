@@ -207,7 +207,7 @@ pub fn initialize_stake(
 }
 
 /// Creates all necessary instructions to deposit stake.
-pub fn deposit_stake(
+pub fn deposit(
     program_id: &Pubkey,
     vote_account: &Pubkey,
     user_stake_account: &Pubkey,
@@ -232,7 +232,7 @@ pub fn deposit_stake(
             stake::state::StakeAuthorize::Withdrawer,
             None,
         ),
-        deposit_stake_instruction(
+        deposit_stake(
             program_id,
             vote_account,
             user_stake_account,
@@ -243,7 +243,7 @@ pub fn deposit_stake(
 }
 
 /// Creates a `DepositStake` instruction.
-pub fn deposit_stake_instruction(
+pub fn deposit_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
     user_stake_account: &Pubkey,
@@ -282,7 +282,7 @@ pub fn deposit_stake_instruction(
 /// Creates all necessary instructions to withdraw stake into a given stake account.
 /// If a new stake account is required, the user should first include `system_instruction::create_account`
 /// with account size `std::mem::size_of::<stake::state::StakeState>()` and owner `stake::program::id()`.
-pub fn withdraw_stake(
+pub fn withdraw(
     program_id: &Pubkey,
     vote_account: &Pubkey,
     user_stake_account: &Pubkey,
@@ -303,7 +303,7 @@ pub fn withdraw_stake(
             token_amount,
         )
         .unwrap(),
-        withdraw_stake_instruction(
+        withdraw_stake(
             program_id,
             vote_account,
             user_stake_account,
@@ -315,7 +315,7 @@ pub fn withdraw_stake(
 }
 
 /// Creates a `WithdrawStake` instruction.
-pub fn withdraw_stake_instruction(
+pub fn withdraw_stake(
     program_id: &Pubkey,
     vote_account: &Pubkey,
     user_stake_account: &Pubkey,

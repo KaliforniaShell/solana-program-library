@@ -6256,6 +6256,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "spl-single-validator-pool"
+version = "1.0.0"
+dependencies = [
+ "arrayref",
+ "borsh",
+ "mpl-token-metadata",
+ "num-derive",
+ "num-traits",
+ "num_enum",
+ "solana-program",
+ "spl-associated-token-account 1.1.2",
+ "spl-token 3.5.0",
+ "thiserror",
+]
+
+[[package]]
 name = "spl-stake-pool"
 version = "0.7.0"
 dependencies = [
@@ -6325,37 +6341,13 @@ dependencies = [
  "solana-vote-program",
  "spl-associated-token-account 1.1.2",
  "spl-math",
+ "spl-single-validator-pool",
  "spl-stake-pool",
- "spl-stake-single-pool",
  "spl-token 3.5.0",
  "spl-token-2022 0.6.0",
  "test-case",
  "thiserror",
  "walkdir",
-]
-
-[[package]]
-name = "spl-stake-single-pool"
-version = "0.7.0"
-dependencies = [
- "arrayref",
- "bincode",
- "borsh",
- "mpl-token-metadata",
- "num-derive",
- "num-traits",
- "num_enum",
- "proptest",
- "serde",
- "serde_derive",
- "solana-program",
- "solana-program-test",
- "solana-sdk",
- "solana-vote-program",
- "spl-associated-token-account 1.1.2",
- "spl-token 3.5.0",
- "test-case",
- "thiserror",
 ]
 
 [[package]]

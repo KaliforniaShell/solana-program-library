@@ -14,11 +14,11 @@ use {
         signature::{Keypair, Signer},
         transaction::{Transaction, TransactionError},
     },
+    spl_single_validator_pool as spool,
     spl_stake_pool::{
         self as mpool,
         error::StakePoolError::{SignatureMissing, WrongManager},
     },
-    spl_stake_single_pool as spool,
     test_case::test_case,
 };
 

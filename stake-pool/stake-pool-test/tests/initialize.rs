@@ -22,9 +22,8 @@ use {
         transaction::{Transaction, TransactionError},
         transport::TransportError,
     },
-    spl_stake_pool as mpool,
+    spl_single_validator_pool as spool, spl_stake_pool as mpool,
     spl_stake_pool::{error, id, instruction, state, MINIMUM_RESERVE_LAMPORTS},
-    spl_stake_single_pool as spool,
     spl_token_2022::{
         extension::StateWithExtensionsOwned,
         state::{Account, Mint},
