@@ -448,23 +448,16 @@ impl Processor {
     }
 
     #[inline(never)] // needed due to stack size violation
-    fn process_initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    fn process_initialize_mint(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let validator_vote_info = next_account_info(account_info_iter)?;
-        let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let rent_info = next_account_info(account_info_iter)?;
         let rent = &Rent::from_account_info(rent_info)?;
-        let clock_info = next_account_info(account_info_iter)?;
-        let stake_history_info = next_account_info(account_info_iter)?;
-        let stake_config_info = next_account_info(account_info_iter)?;
         let system_program_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
-        let stake_program_info = next_account_info(account_info_iter)?;
 
-        let stake_bump_seed =
-            check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
         let authority_bump_seed = check_pool_authority_address(
             program_id,
             validator_vote_info.key,
@@ -474,14 +467,9 @@ impl Processor {
             check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
         check_token_program(token_program_info.key)?;
-        check_stake_program(stake_program_info.key)?;
 
-        let stake_seeds = &[
-            POOL_STAKE_PREFIX,
-            validator_vote_info.key.as_ref(),
-            &[stake_bump_seed],
-        ];
-        let stake_signers = &[&stake_seeds[..]];
+        // XXX TODO FIXME validate the vote account so people cant create bullshit pools
+        // maybe put the owner + 1 variant check in a check_vote_account instruction
 
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
@@ -531,6 +519,52 @@ impl Processor {
             ],
             authority_signers,
         )?;
+
+        Ok(())
+    }
+
+    #[inline(never)] // needed due to stack size violation
+    fn process_initialize_stake(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+        let validator_vote_info = next_account_info(account_info_iter)?;
+        let pool_stake_info = next_account_info(account_info_iter)?;
+        let pool_authority_info = next_account_info(account_info_iter)?;
+        let pool_mint_info = next_account_info(account_info_iter)?;
+        let user_token_account_info = next_account_info(account_info_iter)?;
+        let rent_info = next_account_info(account_info_iter)?;
+        let rent = &Rent::from_account_info(rent_info)?;
+        let clock_info = next_account_info(account_info_iter)?;
+        let stake_history_info = next_account_info(account_info_iter)?;
+        let stake_config_info = next_account_info(account_info_iter)?;
+        let system_program_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+        let stake_program_info = next_account_info(account_info_iter)?;
+
+        let stake_bump_seed =
+            check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+        let authority_bump_seed = check_pool_authority_address(
+            program_id,
+            validator_vote_info.key,
+            pool_authority_info.key,
+        )?;
+        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_system_program(system_program_info.key)?;
+        check_token_program(token_program_info.key)?;
+        check_stake_program(stake_program_info.key)?;
+
+        let stake_seeds = &[
+            POOL_STAKE_PREFIX,
+            validator_vote_info.key.as_ref(),
+            &[stake_bump_seed],
+        ];
+        let stake_signers = &[&stake_seeds[..]];
+
+        let authority_seeds = &[
+            POOL_AUTHORITY_PREFIX,
+            validator_vote_info.key.as_ref(),
+            &[authority_bump_seed],
+        ];
+        let authority_signers = &[&authority_seeds[..]];
 
         // create the pool stake account. user has alread transferred in rent plus the minimum
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
@@ -583,6 +617,19 @@ impl Processor {
                 pool_authority_info.clone(),
             ],
             authority_signers,
+        )?;
+
+        // mint tokens to the user corresponding to their stake deposit
+        // note that this is safe from economic attacks despite the stake being in an activating state
+        // because we block anyone else from depositing until it has activated
+        Self::token_mint_to(
+            validator_vote_info.key,
+            token_program_info.clone(),
+            pool_mint_info.clone(),
+            user_token_account_info.clone(),
+            pool_authority_info.clone(),
+            authority_bump_seed,
+            INITIAL_LAMPORTS,
         )?;
 
         Ok(())
@@ -685,7 +732,7 @@ impl Processor {
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
-            pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
+            pool_mint.supply
         };
 
         // deposit amount is determined off stake because we return excess rent
@@ -762,7 +809,7 @@ impl Processor {
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
-            pool_mint.supply.saturating_add(INITIAL_LAMPORTS)
+            pool_mint.supply
         };
 
         // withdraw amount is determined off stake just like deposit amount
@@ -998,9 +1045,13 @@ impl Processor {
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> ProgramResult {
         let instruction = SinglePoolInstruction::try_from_slice(input)?;
         match instruction {
-            SinglePoolInstruction::Initialize => {
-                msg!("Instruction: Initialize");
-                Self::process_initialize(program_id, accounts)
+            SinglePoolInstruction::InitializeMint => {
+                msg!("Instruction: InitializeMint");
+                Self::process_initialize_mint(program_id, accounts)
+            }
+            SinglePoolInstruction::InitializeStake => {
+                msg!("Instruction: InitializeStake");
+                Self::process_initialize_stake(program_id, accounts)
             }
             SinglePoolInstruction::DepositStake {
                 vote_account_address,

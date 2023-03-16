@@ -22,23 +22,36 @@ use {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
 pub enum SinglePoolInstruction {
-    ///   Initialize a new single-validator pool.
+    ///   Initialize the mint for a new single-validator pool.
+    ///   Step one of the permissionless three-stage initialization flow.
+    ///
+    ///   0. `[]` Validator vote account
+    ///   1. `[]` Pool authority
+    ///   2. `[w]` Pool token mint
+    ///   3. `[]` Rent sysvar
+    ///   4. `[]` System program
+    ///   5. `[]` Token program
+    InitializeMint,
+
+    ///   Initialize the stake account for a new single-validator pool.
+    ///   Step two of the permissionless three-stage initialization flow.
     ///
     ///   0. `[]` Validator vote account
     ///   1. `[w]` Pool stake account
     ///   2. `[]` Pool authority
     ///   3. `[w]` Pool token mint
-    ///   4. `[]` Rent sysvar
-    ///   5. `[]` Clock sysvar
-    ///   6. `[]` Stake history sysvar
-    ///   7. `[]` Stake config sysvar
-    ///   8. `[]` System program
-    ///   9. `[]` Token program
-    ///  10. `[]` Stake program
-    Initialize,
+    ///   4. `[w]` User associated token account to receive pool tokens
+    ///   5. `[]` Rent sysvar
+    ///   6. `[]` Clock sysvar
+    ///   7. `[]` Stake history sysvar
+    ///   8. `[]` Stake config sysvar
+    ///   9. `[]` System program
+    ///  10. `[]` Token program
+    ///  11. `[]` Stake program
+    InitializeStake,
 
-    ///   Deposit some stake into the pool.  The output is a "pool" token representing ownership
-    ///   into the pool. Inputs are converted to the current ratio.
+    ///   Deposit stake into the pool.  The output is a "pool" token representing fractional
+    ///   ownership of the pool stake. Inputs are converted to the current ratio.
     ///
     ///   0. `[w]` Pool stake account
     ///   1. `[]` Pool authority
@@ -75,7 +88,8 @@ pub enum SinglePoolInstruction {
     },
 
     ///   Create token metadata for the stake-pool token in the metaplex-token program.
-    ///   This permissionless instruction is called as part of pool initialization.
+    ///   Step three of the permissionless three-stage initialization flow.
+    ///   Note this instruction is not necessary for the pool to operate, in case of upstream breakage.
     ///
     ///   0. `[]` Pool authority
     ///   1. `[]` Pool token mint
@@ -123,20 +137,56 @@ pub fn initialize(
         .saturating_add(INITIAL_LAMPORTS);
 
     let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
-    let mint_space = spl_token::state::Mint::LEN;
-    let mint_rent = rent.minimum_balance(mint_space);
+    let mint_rent = rent.minimum_balance(spl_token::state::Mint::LEN);
+    let user_token_address =
+        spl_associated_token_account::get_associated_token_address(payer, &mint_address);
 
     vec![
         system_instruction::transfer(payer, &stake_address, stake_rent_plus_one),
         system_instruction::transfer(payer, &mint_address, mint_rent),
-        initialize_instruction(program_id, vote_account),
+        initialize_mint(program_id, vote_account),
+        spl_associated_token_account::instruction::create_associated_token_account(
+            payer,
+            payer,
+            &mint_address,
+            &spl_token::id(),
+        ),
+        initialize_stake(program_id, vote_account, &user_token_address),
         create_token_metadata(program_id, vote_account, payer),
     ]
 }
 
-/// Creates an `Initialize` instruction.
-pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Instruction {
-    let data = SinglePoolInstruction::Initialize.try_to_vec().unwrap();
+/// Creates an `InitializeMint` instruction.
+pub fn initialize_mint(program_id: &Pubkey, vote_account: &Pubkey) -> Instruction {
+    let data = SinglePoolInstruction::InitializeMint.try_to_vec().unwrap();
+    let accounts = vec![
+        AccountMeta::new_readonly(*vote_account, false),
+        AccountMeta::new_readonly(
+            find_pool_authority_address(program_id, vote_account).0,
+            false,
+        ),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new_readonly(sysvar::rent::id(), false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(spl_token::id(), false),
+    ];
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
+}
+
+/// Creates an `InitializeStake` instruction.
+pub fn initialize_stake(
+    program_id: &Pubkey,
+    vote_account: &Pubkey,
+    user_token_address: &Pubkey,
+) -> Instruction {
+    let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
+
+    let data = SinglePoolInstruction::InitializeStake.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
         AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
@@ -144,7 +194,8 @@ pub fn initialize_instruction(program_id: &Pubkey, vote_account: &Pubkey) -> Ins
             find_pool_authority_address(program_id, vote_account).0,
             false,
         ),
-        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new(mint_address, false),
+        AccountMeta::new(*user_token_address, false),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
         AccountMeta::new_readonly(sysvar::stake_history::id(), false),
