@@ -17,6 +17,7 @@ use {
         borsh::try_from_slice_unchecked,
         entrypoint::ProgramResult,
         msg,
+        native_token::LAMPORTS_PER_SOL,
         program::invoke_signed,
         program_error::ProgramError,
         program_pack::Pack,
@@ -92,7 +93,7 @@ fn check_pool_stake_address(
     address: &Pubkey,
 ) -> Result<u8, ProgramError> {
     let (pool_stake_address, bump_seed) =
-        crate::find_pool_stake_address(program_id, vote_account_address);
+        crate::find_pool_stake_address_and_bump(program_id, vote_account_address);
     if *address != pool_stake_address {
         msg!(
             "Incorrect pool stake address for vote {}, expected {}, received {}",
@@ -113,7 +114,7 @@ fn check_pool_authority_address(
     address: &Pubkey,
 ) -> Result<u8, ProgramError> {
     let (pool_authority_address, bump_seed) =
-        crate::find_pool_authority_address(program_id, vote_account_address);
+        crate::find_pool_authority_address_and_bump(program_id, vote_account_address);
     if *address != pool_authority_address {
         msg!(
             "Incorrect pool authority address for vote {}, expected {}, received {}",
@@ -134,7 +135,7 @@ fn check_pool_mint_address(
     address: &Pubkey,
 ) -> Result<u8, ProgramError> {
     let (pool_mint_address, bump_seed) =
-        crate::find_pool_mint_address(program_id, vote_account_address);
+        crate::find_pool_mint_address_and_bump(program_id, vote_account_address);
     if *address != pool_mint_address {
         msg!(
             "Incorrect pool mint address for vote {}, expected {}, received {}",
@@ -145,6 +146,23 @@ fn check_pool_mint_address(
         Err(SinglePoolError::InvalidPoolMint.into())
     } else {
         Ok(bump_seed)
+    }
+}
+
+/// Check vote account is owned by the vote program and not a legacy variant
+fn check_vote_account(vote_account_info: &AccountInfo) -> Result<(), ProgramError> {
+    check_account_owner(vote_account_info, &vote_program::id())?;
+
+    let vote_account_data = &vote_account_info.try_borrow_data()?;
+    let state_variant = vote_account_data
+        .get(..VOTE_STATE_START)
+        .and_then(|s| s.try_into().ok())
+        .ok_or(SinglePoolError::UnparseableVoteAccount)?;
+
+    match u32::from_le_bytes(state_variant) {
+        1 => Ok(()),
+        0 => Err(SinglePoolError::LegacyVoteAccount.into()),
+        _ => Err(SinglePoolError::UnparseableVoteAccount.into()),
     }
 }
 
@@ -234,12 +252,21 @@ fn check_account_owner(
     }
 }
 
+/// Minimum delegation to create a pool
+/// We floor at 1sol to avoid over-minting tokens before the relevant feature is active
+fn minimum_delegation() -> Result<u64, ProgramError> {
+    Ok(std::cmp::max(
+        stake::tools::get_minimum_delegation()?,
+        LAMPORTS_PER_SOL,
+    ))
+}
+
 /// Program state handler.
 pub struct Processor {}
 impl Processor {
     #[allow(clippy::too_many_arguments)]
     fn stake_merge<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         source_account: AccountInfo<'a>,
         authority: AccountInfo<'a>,
         bump_seed: u8,
@@ -249,7 +276,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -269,7 +296,7 @@ impl Processor {
     }
 
     fn stake_split<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         authority: AccountInfo<'a>,
         bump_seed: u8,
@@ -278,7 +305,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -295,7 +322,7 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     fn stake_authorize<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         stake_authority: AccountInfo<'a>,
         bump_seed: u8,
@@ -304,7 +331,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -343,7 +370,7 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     fn stake_withdraw<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         stake_account: AccountInfo<'a>,
         stake_authority: AccountInfo<'a>,
         bump_seed: u8,
@@ -354,7 +381,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -382,7 +409,7 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     fn token_mint_to<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         token_program: AccountInfo<'a>,
         mint: AccountInfo<'a>,
         destination: AccountInfo<'a>,
@@ -392,7 +419,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -411,7 +438,7 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     fn token_burn<'a>(
-        validator_vote_key: &Pubkey,
+        vote_account_key: &Pubkey,
         token_program: AccountInfo<'a>,
         burn_account: AccountInfo<'a>,
         mint: AccountInfo<'a>,
@@ -421,7 +448,7 @@ impl Processor {
     ) -> Result<(), ProgramError> {
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_key.as_ref(),
+            vote_account_key.as_ref(),
             &[bump_seed],
         ];
         let signers = &[&authority_seeds[..]];
@@ -440,49 +467,40 @@ impl Processor {
 
     fn process_initialize_mint(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let validator_vote_info = next_account_info(account_info_iter)?;
+        let vote_account_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
         let rent_info = next_account_info(account_info_iter)?;
-        let rent = &Rent::from_account_info(rent_info)?;
         let system_program_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
 
+        check_vote_account(vote_account_info)?;
         let authority_bump_seed = check_pool_authority_address(
             program_id,
-            validator_vote_info.key,
+            vote_account_info.key,
             pool_authority_info.key,
         )?;
         let mint_bump_seed =
-            check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+            check_pool_mint_address(program_id, vote_account_info.key, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
         check_token_program(token_program_info.key)?;
 
-        // XXX TODO FIXME validate the vote account so people cant create bullshit pools
-        // maybe put the owner + 1 variant check in a check_vote_account instruction
-
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_info.key.as_ref(),
+            vote_account_info.key.as_ref(),
             &[authority_bump_seed],
         ];
         let authority_signers = &[&authority_seeds[..]];
 
         let mint_seeds = &[
             POOL_MINT_PREFIX,
-            validator_vote_info.key.as_ref(),
+            vote_account_info.key.as_ref(),
             &[mint_bump_seed],
         ];
         let mint_signers = &[&mint_seeds[..]];
 
         // create the pool mint. user has already transferred in rent
         let mint_space = spl_token::state::Mint::LEN;
-        let mint_rent = rent.minimum_balance(mint_space);
-
-        // TODO remove this after confirming for myself that spl-token doesnt allow creating rentpigs
-        if pool_mint_info.lamports() < mint_rent {
-            return Err(SinglePoolError::WrongRentAmount.into());
-        }
 
         invoke_signed(
             &system_instruction::allocate(pool_mint_info.key, mint_space as u64),
@@ -496,6 +514,7 @@ impl Processor {
             mint_signers,
         )?;
 
+        // XXX FIXME is there a version that doesnt need the sysvar?
         invoke_signed(
             &spl_token::instruction::initialize_mint(
                 token_program_info.key,
@@ -513,7 +532,7 @@ impl Processor {
 
     fn process_initialize_stake(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
-        let validator_vote_info = next_account_info(account_info_iter)?;
+        let vote_account_info = next_account_info(account_info_iter)?;
         let pool_stake_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
@@ -527,34 +546,35 @@ impl Processor {
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
+        check_vote_account(vote_account_info)?;
         let stake_bump_seed =
-            check_pool_stake_address(program_id, validator_vote_info.key, pool_stake_info.key)?;
+            check_pool_stake_address(program_id, vote_account_info.key, pool_stake_info.key)?;
         let authority_bump_seed = check_pool_authority_address(
             program_id,
-            validator_vote_info.key,
+            vote_account_info.key,
             pool_authority_info.key,
         )?;
-        check_pool_mint_address(program_id, validator_vote_info.key, pool_mint_info.key)?;
+        check_pool_mint_address(program_id, vote_account_info.key, pool_mint_info.key)?;
         check_system_program(system_program_info.key)?;
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
         let stake_seeds = &[
             POOL_STAKE_PREFIX,
-            validator_vote_info.key.as_ref(),
+            vote_account_info.key.as_ref(),
             &[stake_bump_seed],
         ];
         let stake_signers = &[&stake_seeds[..]];
 
         let authority_seeds = &[
             POOL_AUTHORITY_PREFIX,
-            validator_vote_info.key.as_ref(),
+            vote_account_info.key.as_ref(),
             &[authority_bump_seed],
         ];
         let authority_signers = &[&authority_seeds[..]];
 
         // create the pool stake account. user has alread transferred in rent plus the minimum
-        let minimum_delegation = stake::tools::get_minimum_delegation()?;
+        let minimum_delegation = minimum_delegation()?;
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
         let stake_rent_plus_initial = rent
             .minimum_balance(stake_space)
@@ -598,11 +618,11 @@ impl Processor {
             &stake::instruction::delegate_stake(
                 pool_stake_info.key,
                 pool_authority_info.key,
-                validator_vote_info.key,
+                vote_account_info.key,
             ),
             &[
                 pool_stake_info.clone(),
-                validator_vote_info.clone(),
+                vote_account_info.clone(),
                 clock_info.clone(),
                 stake_history_info.clone(),
                 stake_config_info.clone(),
@@ -619,7 +639,7 @@ impl Processor {
         // TODO reread this part of the stake program (or just test for ourselves actually...) that uh
         // no weird shit like "merge into activating and then split" can implicitly deactivate...
         Self::token_mint_to(
-            validator_vote_info.key,
+            vote_account_info.key,
             token_program_info.clone(),
             pool_mint_info.clone(),
             user_token_account_info.clone(),
@@ -816,6 +836,12 @@ impl Processor {
             return Err(SinglePoolError::WithdrawalTooSmall.into());
         }
 
+        // the second case should never be true, but its best to be sure
+        // FIXME we might want the first case to include minimum_delegation, but i think i want to bikeshed a lil more
+        if withdraw_stake > pre_pool_stake || withdraw_stake == pool_stake_info.lamports() {
+            return Err(SinglePoolError::WithdrawalTooLarge.into());
+        }
+
         // burn user tokens corresponding to the amount of stake they wish to withdraw
         Self::token_burn(
             vote_account_address,
@@ -953,35 +979,24 @@ impl Processor {
         let metadata_info = next_account_info(account_info_iter)?;
         let mpl_token_metadata_program_info = next_account_info(account_info_iter)?;
 
-        check_account_owner(vote_account_info, &vote_program::id())?;
+        check_vote_account(vote_account_info)?;
         let bump_seed = check_pool_authority_address(
             program_id,
             vote_account_info.key,
             pool_authority_info.key,
         )?;
-        let (pool_mint_address, _) =
-            crate::find_pool_mint_address(program_id, vote_account_info.key);
+        let pool_mint_address = crate::find_pool_mint_address(program_id, vote_account_info.key);
         check_mpl_metadata_program(mpl_token_metadata_program_info.key)?;
         check_mpl_metadata_account_address(metadata_info.key, &pool_mint_address)?;
-
-        // XXX can vote program own other types of accounts? do i need to do any further validation?
-        let vote_account_data = &vote_account_info.try_borrow_data()?;
-        let state_variant = vote_account_data
-            .get(..VOTE_STATE_START)
-            .and_then(|s| s.try_into().ok())
-            .ok_or(SinglePoolError::UnparseableVoteAccount)?;
 
         // we use authorized_withdrawer to authenticate the caller controls the vote account
         // this is safer than using an authorized_voter since those keys live hot
         // and validator-operators we spoke with indicated this would be their preference as well
-        let vote_account_withdrawer = match u32::from_le_bytes(state_variant) {
-            1 => vote_account_data
-                .get(VOTE_STATE_START..VOTE_STATE_END)
-                .map(Pubkey::new)
-                .ok_or(SinglePoolError::UnparseableVoteAccount),
-            0 => Err(SinglePoolError::LegacyVoteAccount),
-            _ => Err(SinglePoolError::UnparseableVoteAccount),
-        }?;
+        let vote_account_data = &vote_account_info.try_borrow_data()?;
+        let vote_account_withdrawer = vote_account_data
+            .get(VOTE_STATE_START..VOTE_STATE_END)
+            .map(Pubkey::new)
+            .ok_or(SinglePoolError::UnparseableVoteAccount)?;
 
         if *authorized_withdrawer_info.key != vote_account_withdrawer {
             msg!("Vote account authorized withdrawer does not match the account provided.");

@@ -36,17 +36,21 @@ pub enum SinglePoolError {
     /// Not enough pool tokens provided to withdraw stake worth one lamport.
     #[error("WithdrawalTooSmall")]
     WithdrawalTooSmall,
+    /// Not enough stake to cover the provided quantity of pool tokens.
+    /// (Generally this should not happen absent user error, but may if the minimum delegation increases.)
+    #[error("WithdrawalTooLarge")]
+    WithdrawalTooLarge,
     /// Required signature is missing.
     #[error("SignatureMissing")]
     SignatureMissing,
     /// Stake account is not in the state expected by the program.
     #[error("WrongStakeState")]
     WrongStakeState,
+
+    // 10.
     /// Unsigned subtraction crossed the zero.
     #[error("ArithmeticOverflow")]
     ArithmeticOverflow,
-
-    // 10.
     /// A calculation failed unexpectedly.
     /// (This error should never be surfaced; it stands in for failure conditions that should never be reached.)
     #[error("UnexpectedMathError")]
@@ -95,6 +99,9 @@ impl PrintProgramError for SinglePoolError {
                 msg!("Error: Not enough lamports provided for deposit to result in one pool token."),
             SinglePoolError::WithdrawalTooSmall =>
                 msg!("Error: Not enough pool tokens provided to withdraw stake worth one lamport."),
+            SinglePoolError::WithdrawalTooLarge =>
+                msg!("Error: Not enough stake to cover the provided quantity of pool tokens. \
+                     (Generally this should not happen absent user error, but may if the minimum delegation increases.)"),
             SinglePoolError::SignatureMissing => msg!("Error: Required signature is missing."),
             SinglePoolError::WrongStakeState => msg!("Error: Stake account is not in the state expected by the program."),
             SinglePoolError::ArithmeticOverflow => msg!("Error: Unsigned subtraction crossed the zero."),

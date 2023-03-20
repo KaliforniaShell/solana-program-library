@@ -58,9 +58,9 @@ impl PoolAccounts {
 
         Self {
             validator: Keypair::new(),
-            stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()).0,
-            authority: find_pool_authority_address(&id(), &vote_account.pubkey()).0,
-            mint: find_pool_mint_address(&id(), &vote_account.pubkey()).0,
+            stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()),
+            authority: find_pool_authority_address(&id(), &vote_account.pubkey()),
+            mint: find_pool_mint_address(&id(), &vote_account.pubkey()),
             vote_account,
         }
     }
@@ -86,7 +86,7 @@ impl PoolAccounts {
             &self.vote_account.pubkey(),
             &payer.pubkey(),
             &rent,
-            1,
+            LAMPORTS_PER_SOL,
         );
         let message = Message::new(&instructions, Some(&payer.pubkey()));
         let transaction = Transaction::new(&[payer], message, *recent_blockhash);

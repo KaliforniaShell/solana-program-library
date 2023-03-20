@@ -95,9 +95,9 @@ impl Default for SinglePoolAccounts {
 
         Self {
             validator: Keypair::new(),
-            authority: find_pool_authority_address(&id(), &vote_account.pubkey()).0,
-            stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()).0,
-            mint: find_pool_mint_address(&id(), &vote_account.pubkey()).0,
+            authority: find_pool_authority_address(&id(), &vote_account.pubkey()),
+            stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()),
+            mint: find_pool_mint_address(&id(), &vote_account.pubkey()),
             vote_account,
             token_program_id: spl_token::id(),
             legacy_vote: false,

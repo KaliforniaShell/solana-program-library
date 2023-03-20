@@ -37,7 +37,7 @@ pub enum SinglePoolInstruction {
     ///   1. `[w]` Pool stake account
     ///   2. `[]` Pool authority
     ///   3. `[w]` Pool token mint
-    ///   4. `[w]` User associated token account to receive pool tokens
+    ///   4. `[w]` User token account to receive pool tokens
     ///   5. `[]` Rent sysvar
     ///   6. `[]` Clock sysvar
     ///   7. `[]` Stake history sysvar
@@ -125,13 +125,13 @@ pub fn initialize(
     rent: &Rent,
     minimum_delegation: u64,
 ) -> Vec<Instruction> {
-    let (stake_address, _) = find_pool_stake_address(program_id, vote_account);
+    let stake_address = find_pool_stake_address(program_id, vote_account);
     let stake_space = std::mem::size_of::<stake::state::StakeState>();
     let stake_rent_plus_one = rent
         .minimum_balance(stake_space)
         .saturating_add(minimum_delegation);
 
-    let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
+    let mint_address = find_pool_mint_address(program_id, vote_account);
     let mint_rent = rent.minimum_balance(spl_token::state::Mint::LEN);
     let user_token_address =
         spl_associated_token_account::get_associated_token_address(payer, &mint_address);
@@ -156,11 +156,8 @@ pub fn initialize_mint(program_id: &Pubkey, vote_account: &Pubkey) -> Instructio
     let data = SinglePoolInstruction::InitializeMint.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
-        AccountMeta::new_readonly(
-            find_pool_authority_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new_readonly(find_pool_authority_address(program_id, vote_account), false),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account), false),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(system_program::id(), false),
         AccountMeta::new_readonly(spl_token::id(), false),
@@ -179,16 +176,13 @@ pub fn initialize_stake(
     vote_account: &Pubkey,
     user_token_address: &Pubkey,
 ) -> Instruction {
-    let (mint_address, _) = find_pool_mint_address(program_id, vote_account);
+    let mint_address = find_pool_mint_address(program_id, vote_account);
 
     let data = SinglePoolInstruction::InitializeStake.try_to_vec().unwrap();
     let accounts = vec![
         AccountMeta::new_readonly(*vote_account, false),
-        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
-        AccountMeta::new_readonly(
-            find_pool_authority_address(program_id, vote_account).0,
-            false,
-        ),
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account), false),
+        AccountMeta::new_readonly(find_pool_authority_address(program_id, vote_account), false),
         AccountMeta::new(mint_address, false),
         AccountMeta::new(*user_token_address, false),
         AccountMeta::new_readonly(sysvar::rent::id(), false),
@@ -216,7 +210,7 @@ pub fn deposit(
     user_lamport_account: &Pubkey,
     user_withdraw_authority: &Pubkey,
 ) -> Vec<Instruction> {
-    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
+    let pool_authority = find_pool_authority_address(program_id, vote_account);
 
     vec![
         stake::instruction::authorize(
@@ -258,12 +252,9 @@ pub fn deposit_stake(
     .unwrap();
 
     let accounts = vec![
-        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
-        AccountMeta::new_readonly(
-            find_pool_authority_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account), false),
+        AccountMeta::new_readonly(find_pool_authority_address(program_id, vote_account), false),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account), false),
         AccountMeta::new(*user_stake_account, false),
         AccountMeta::new(*user_token_account, false),
         AccountMeta::new(*user_lamport_account, false),
@@ -292,7 +283,7 @@ pub fn withdraw(
     user_token_authority: &Pubkey,
     token_amount: u64,
 ) -> Vec<Instruction> {
-    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
+    let pool_authority = find_pool_authority_address(program_id, vote_account);
 
     vec![
         spl_token::instruction::approve(
@@ -333,12 +324,9 @@ pub fn withdraw_stake(
     .unwrap();
 
     let accounts = vec![
-        AccountMeta::new(find_pool_stake_address(program_id, vote_account).0, false),
-        AccountMeta::new_readonly(
-            find_pool_authority_address(program_id, vote_account).0,
-            false,
-        ),
-        AccountMeta::new(find_pool_mint_address(program_id, vote_account).0, false),
+        AccountMeta::new(find_pool_stake_address(program_id, vote_account), false),
+        AccountMeta::new_readonly(find_pool_authority_address(program_id, vote_account), false),
+        AccountMeta::new(find_pool_mint_address(program_id, vote_account), false),
         AccountMeta::new(*user_stake_account, false),
         AccountMeta::new(*user_token_account, false),
         AccountMeta::new_readonly(sysvar::clock::id(), false),
@@ -363,8 +351,8 @@ pub fn create_token_metadata(
     vote_account: &Pubkey,
     payer: &Pubkey,
 ) -> Instruction {
-    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
-    let (pool_mint, _) = find_pool_mint_address(program_id, vote_account);
+    let pool_authority = find_pool_authority_address(program_id, vote_account);
+    let pool_mint = find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
     let data = SinglePoolInstruction::CreateTokenMetadata {
         vote_account_address: *vote_account,
@@ -397,8 +385,8 @@ pub fn update_token_metadata(
     symbol: String,
     uri: String,
 ) -> Instruction {
-    let (pool_authority, _) = find_pool_authority_address(program_id, vote_account);
-    let (pool_mint, _) = find_pool_mint_address(program_id, vote_account);
+    let pool_authority = find_pool_authority_address(program_id, vote_account);
+    let pool_mint = find_pool_mint_address(program_id, vote_account);
     let (token_metadata, _) = find_metadata_account(&pool_mint);
     let data = SinglePoolInstruction::UpdateTokenMetadata { name, symbol, uri }
         .try_to_vec()
