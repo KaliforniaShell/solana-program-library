@@ -25,9 +25,8 @@ pub enum SinglePoolInstruction {
     ///   0. `[]` Validator vote account
     ///   1. `[]` Pool authority
     ///   2. `[w]` Pool token mint
-    ///   3. `[]` Rent sysvar
-    ///   4. `[]` System program
-    ///   5. `[]` Token program
+    ///   3. `[]` System program
+    ///   4. `[]` Token program
     InitializeMint,
 
     ///   Initialize the stake account for a new single-validator pool.
@@ -158,7 +157,6 @@ pub fn initialize_mint(program_id: &Pubkey, vote_account: &Pubkey) -> Instructio
         AccountMeta::new_readonly(*vote_account, false),
         AccountMeta::new_readonly(find_pool_authority_address(program_id, vote_account), false),
         AccountMeta::new(find_pool_mint_address(program_id, vote_account), false),
-        AccountMeta::new_readonly(sysvar::rent::id(), false),
         AccountMeta::new_readonly(system_program::id(), false),
         AccountMeta::new_readonly(spl_token::id(), false),
     ];

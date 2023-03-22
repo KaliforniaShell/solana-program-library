@@ -23,10 +23,8 @@ use {
         program_pack::Pack,
         pubkey::Pubkey,
         rent::Rent,
-        stake,
-        stake_history::Epoch,
-        system_instruction, system_program,
-        sysvar::{clock::Clock, Sysvar},
+        stake, system_instruction, system_program,
+        sysvar::Sysvar,
         vote::program as vote_program,
     },
     spl_token::state::Mint,
@@ -65,23 +63,12 @@ fn calculate_withdraw_amount(
     }
 }
 
-// FIXME sleep on whether to undo the "active" change i made to the original version of this function
-// im 70% sure i did it only because the extra functionality was unnecessary
-// rather than guarding against any behavior that is truly unwanted
-/// Deserialize the stake state from AccountInfo
-fn get_active_stake_state(
-    stake_account_info: &AccountInfo,
-    current_epoch: Epoch,
-) -> Result<stake::state::Stake, ProgramError> {
+/// Deserialize the stake amount from AccountInfo
+fn get_stake_amount(stake_account_info: &AccountInfo) -> Result<u64, ProgramError> {
     let stake_state =
         try_from_slice_unchecked::<stake::state::StakeState>(&stake_account_info.data.borrow())?;
     match stake_state {
-        stake::state::StakeState::Stake(_, stake)
-            if stake.delegation.activation_epoch < current_epoch
-                && stake.delegation.deactivation_epoch == Epoch::MAX =>
-        {
-            Ok(stake)
-        }
+        stake::state::StakeState::Stake(_, stake) => Ok(stake.delegation.stake),
         _ => Err(SinglePoolError::WrongStakeState.into()),
     }
 }
@@ -470,7 +457,6 @@ impl Processor {
         let vote_account_info = next_account_info(account_info_iter)?;
         let pool_authority_info = next_account_info(account_info_iter)?;
         let pool_mint_info = next_account_info(account_info_iter)?;
-        let rent_info = next_account_info(account_info_iter)?;
         let system_program_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
 
@@ -514,16 +500,15 @@ impl Processor {
             mint_signers,
         )?;
 
-        // XXX FIXME is there a version that doesnt need the sysvar?
         invoke_signed(
-            &spl_token::instruction::initialize_mint(
+            &spl_token::instruction::initialize_mint2(
                 token_program_info.key,
                 pool_mint_info.key,
                 pool_authority_info.key,
                 None,
                 MINT_DECIMALS,
             )?,
-            &[pool_mint_info.clone(), rent_info.clone()],
+            &[pool_mint_info.clone()],
             authority_signers,
         )?;
 
@@ -573,17 +558,13 @@ impl Processor {
         ];
         let authority_signers = &[&authority_seeds[..]];
 
-        // create the pool stake account. user has alread transferred in rent plus the minimum
+        // create the pool stake account. user has already transferred in rent plus at least the minimum
         let minimum_delegation = minimum_delegation()?;
         let stake_space = std::mem::size_of::<stake::state::StakeState>();
         let stake_rent_plus_initial = rent
             .minimum_balance(stake_space)
             .saturating_add(minimum_delegation);
 
-        // XXX TODO FIXME jon raised the important issue that if we check != someone can dos pool creation
-        // unfortunately, that complicates the token minting, because we undermint if someone overpays
-        // i believe we should be able to load the stake account data after delegation to see the true stake amount
-        // TODO also write a test that overpayment goes smoothly
         if pool_stake_info.lamports() < stake_rent_plus_initial {
             return Err(SinglePoolError::WrongRentAmount.into());
         }
@@ -631,22 +612,23 @@ impl Processor {
             authority_signers,
         )?;
 
-        // mint tokens to the user corresponding to their stake deposit
-        // note that this is safe from economic attacks despite the stake being in an activating state
-        // because we block anyone else from depositing until it has activated
-        // XXX actually do we give a shit about the activating stake?
-        // theres no economic attack anyway because theres no rewards! right??
-        // TODO reread this part of the stake program (or just test for ourselves actually...) that uh
-        // no weird shit like "merge into activating and then split" can implicitly deactivate...
-        Self::token_mint_to(
-            vote_account_info.key,
-            token_program_info.clone(),
-            pool_mint_info.clone(),
-            user_token_account_info.clone(),
-            pool_authority_info.clone(),
-            authority_bump_seed,
-            minimum_delegation,
-        )?;
+        // mint tokens if they overpaid the minimum amount
+        // XXX we could do away with this and cut two accounts from the instruction but idk this is more polite
+        let available_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
+
+        if available_stake > 0 {
+            // TODO reread this part of the stake program (or just test for ourselves actually...) that uh
+            // no weird shit like "merge into activating and then split" can implicitly deactivate...
+            Self::token_mint_to(
+                vote_account_info.key,
+                token_program_info.clone(),
+                pool_mint_info.clone(),
+                user_token_account_info.clone(),
+                pool_authority_info.clone(),
+                authority_bump_seed,
+                available_stake,
+            )?;
+        }
 
         Ok(())
     }
@@ -664,7 +646,6 @@ impl Processor {
         let user_token_account_info = next_account_info(account_info_iter)?;
         let user_lamport_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
-        let clock = &Clock::from_account_info(clock_info)?;
         let stake_history_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
@@ -683,16 +664,13 @@ impl Processor {
             panic!("error here");
         }
 
-        // we enforce that our stake is active so depositing/withdrawing during the warmup epoch is impossible
-        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
-            .delegation
-            .stake;
-        let pre_pool_lamports = pool_stake_info.lamports();
-        msg!("Stake pre merge {}", pre_pool_stake);
+        let minimum_delegation = minimum_delegation()?;
 
-        let pre_user_stake = get_active_stake_state(user_stake_info, clock.epoch)?
-            .delegation
-            .stake;
+        let pre_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
+        let pre_pool_lamports = pool_stake_info.lamports();
+        msg!("Available stake pre merge {}", pre_pool_stake);
+
+        let pre_user_stake = get_stake_amount(user_stake_info)?;
         let user_unstaked_lamports = user_stake_info
             .lamports()
             .checked_sub(pre_user_stake)
@@ -710,11 +688,9 @@ impl Processor {
             stake_history_info.clone(),
         )?;
 
-        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
-            .delegation
-            .stake;
+        let post_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
         let post_pool_lamports = pool_stake_info.lamports();
-        msg!("Stake post merge {}", post_pool_stake);
+        msg!("Available stake post merge {}", post_pool_stake);
 
         // all lamports added, as a lamport difference, both stake and excess rent
         let lamports_added = post_pool_lamports
@@ -746,7 +722,6 @@ impl Processor {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
-        // we add initial lamports to supply to make the math work without minting tokens to incinerator
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
@@ -801,7 +776,6 @@ impl Processor {
         let user_stake_info = next_account_info(account_info_iter)?;
         let user_token_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
-        let clock = &Clock::from_account_info(clock_info)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
 
@@ -815,13 +789,11 @@ impl Processor {
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
 
-        // we enforce that our stake is active so depositing/withdrawing during the warmup epoch is impossible
-        let pre_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
-            .delegation
-            .stake;
-        msg!("Stake pre split {}", pre_pool_stake);
+        let minimum_delegation = minimum_delegation()?;
 
-        // we add initial lamports to supply to make the math work without minting tokens to incinerator
+        let pre_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
+        msg!("Available stake pre split {}", pre_pool_stake);
+
         let token_supply = {
             let pool_mint_data = pool_mint_info.try_borrow_data()?;
             let pool_mint = Mint::unpack_from_slice(&pool_mint_data)?;
@@ -837,7 +809,6 @@ impl Processor {
         }
 
         // the second case should never be true, but its best to be sure
-        // FIXME we might want the first case to include minimum_delegation, but i think i want to bikeshed a lil more
         if withdraw_stake > pre_pool_stake || withdraw_stake == pool_stake_info.lamports() {
             return Err(SinglePoolError::WithdrawalTooLarge.into());
         }
@@ -873,10 +844,8 @@ impl Processor {
             clock_info.clone(),
         )?;
 
-        let post_pool_stake = get_active_stake_state(pool_stake_info, clock.epoch)?
-            .delegation
-            .stake;
-        msg!("Stake post split {}", post_pool_stake);
+        let post_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
+        msg!("Available stake post split {}", post_pool_stake);
 
         Ok(())
     }
