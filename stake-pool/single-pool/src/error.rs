@@ -64,6 +64,11 @@ pub enum SinglePoolError {
     /// Incorrect number of lamports provided for rent-exemption when initializing.
     #[error("WrongRentAmount")]
     WrongRentAmount,
+
+    // 15.
+    /// Attempted to deposit from or withdraw to pool stake account.
+    #[error("InvalidPoolAccountUsage")]
+    InvalidPoolAccountUsage,
 }
 impl From<SinglePoolError> for ProgramError {
     fn from(e: SinglePoolError) -> Self {
@@ -113,6 +118,8 @@ impl PrintProgramError for SinglePoolError {
                 msg!("Error: The V0_23_5 vote account type is unsupported and should be upgraded via `convert_to_current()`."),
             SinglePoolError::WrongRentAmount =>
                 msg!("Error: Incorrect number of lamports provided for rent-exemption when initializing."),
+            SinglePoolError::InvalidPoolAccountUsage =>
+                msg!("Error: Attempted to deposit from or withdraw to pool stake account."),
         }
     }
 }

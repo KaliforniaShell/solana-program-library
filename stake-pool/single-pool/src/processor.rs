@@ -23,8 +23,13 @@ use {
         program_pack::Pack,
         pubkey::Pubkey,
         rent::Rent,
-        stake, system_instruction, system_program,
-        sysvar::Sysvar,
+        stake::{
+            self,
+            state::{Meta, Stake, StakeState},
+        },
+        stake_history::Epoch,
+        system_instruction, system_program,
+        sysvar::{clock::Clock, Sysvar},
         vote::program as vote_program,
     },
     spl_token::state::Mint,
@@ -63,14 +68,25 @@ fn calculate_withdraw_amount(
     }
 }
 
-/// Deserialize the stake amount from AccountInfo
-fn get_stake_amount(stake_account_info: &AccountInfo) -> Result<u64, ProgramError> {
-    let stake_state =
-        try_from_slice_unchecked::<stake::state::StakeState>(&stake_account_info.data.borrow())?;
+/// Deserialize the stake state from AccountInfo
+fn get_stake_state(stake_account_info: &AccountInfo) -> Result<(Meta, Stake), ProgramError> {
+    let stake_state = try_from_slice_unchecked::<StakeState>(&stake_account_info.data.borrow())?;
+
     match stake_state {
-        stake::state::StakeState::Stake(_, stake) => Ok(stake.delegation.stake),
+        StakeState::Stake(meta, stake) => Ok((meta, stake)),
         _ => Err(SinglePoolError::WrongStakeState.into()),
     }
+}
+
+/// Deserialize the stake amount from AccountInfo
+fn get_stake_amount(stake_account_info: &AccountInfo) -> Result<u64, ProgramError> {
+    Ok(get_stake_state(stake_account_info)?.1.delegation.stake)
+}
+
+/// Determine if stake is active
+fn is_stake_active(stake: &Stake, current_epoch: Epoch) -> bool {
+    stake.delegation.activation_epoch < current_epoch
+        && stake.delegation.deactivation_epoch == Epoch::MAX
 }
 
 /// Check pool stake account address for the validator vote account
@@ -646,6 +662,7 @@ impl Processor {
         let user_token_account_info = next_account_info(account_info_iter)?;
         let user_lamport_account_info = next_account_info(account_info_iter)?;
         let clock_info = next_account_info(account_info_iter)?;
+        let clock = &Clock::from_account_info(clock_info)?;
         let stake_history_info = next_account_info(account_info_iter)?;
         let token_program_info = next_account_info(account_info_iter)?;
         let stake_program_info = next_account_info(account_info_iter)?;
@@ -661,20 +678,27 @@ impl Processor {
         check_stake_program(stake_program_info.key)?;
 
         if pool_stake_info.key == user_stake_info.key {
-            panic!("error here");
+            return Err(SinglePoolError::InvalidPoolAccountUsage.into());
         }
 
         let minimum_delegation = minimum_delegation()?;
 
-        let pre_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
-        let pre_pool_lamports = pool_stake_info.lamports();
+        let (_, pool_stake_state) = get_stake_state(pool_stake_info)?;
+        let pre_pool_stake = pool_stake_state
+            .delegation
+            .stake
+            .saturating_sub(minimum_delegation);
         msg!("Available stake pre merge {}", pre_pool_stake);
 
-        let pre_user_stake = get_stake_amount(user_stake_info)?;
-        let user_unstaked_lamports = user_stake_info
-            .lamports()
-            .checked_sub(pre_user_stake)
-            .ok_or(SinglePoolError::ArithmeticOverflow)?;
+        let (_, user_stake_state) = get_stake_state(user_stake_info)?;
+        let pre_user_stake = user_stake_state.delegation.stake;
+
+        // user can deposit active stake into an active pool or inactive stake into an activating pool
+        if is_stake_active(&pool_stake_state, clock.epoch)
+            != is_stake_active(&user_stake_state, clock.epoch)
+        {
+            return Err(SinglePoolError::WrongStakeState.into());
+        }
 
         // merge the user stake account, which is preauthed to us, into the pool stake account
         // this merge succeeding implicitly validates authority/lockup of the user stake account
@@ -688,32 +712,33 @@ impl Processor {
             stake_history_info.clone(),
         )?;
 
-        let post_pool_stake = get_stake_amount(pool_stake_info)?.saturating_sub(minimum_delegation);
+        let (pool_stake_meta, pool_stake_state) = get_stake_state(pool_stake_info)?;
+        let post_pool_stake = pool_stake_state
+            .delegation
+            .stake
+            .saturating_sub(minimum_delegation);
         let post_pool_lamports = pool_stake_info.lamports();
         msg!("Available stake post merge {}", post_pool_stake);
-
-        // all lamports added, as a lamport difference, both stake and excess rent
-        let lamports_added = post_pool_lamports
-            .checked_sub(pre_pool_lamports)
-            .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
         // stake lamports added, as a stake difference
         let stake_added = post_pool_stake
             .checked_sub(pre_pool_stake)
             .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
-        // excess rent, as all lamports less stake
-        let leftover_rent = lamports_added
-            .checked_sub(stake_added)
+        // we calculate absolute rather than relative to deposit amount to allow claiming lamports mistakenly transferred in
+        let excess_lamports = post_pool_lamports
+            .checked_sub(post_pool_stake)
+            .and_then(|amount| amount.checked_sub(pool_stake_meta.rent_exempt_reserve))
+            .and_then(|amount| amount.checked_sub(minimum_delegation))
             .ok_or(SinglePoolError::ArithmeticOverflow)?;
 
-        // sanity check: our calculated new stake matches the user prior stake
-        if stake_added != pre_user_stake {
+        // sanity check: we have not somehow gone below the minimum
+        if post_pool_stake < minimum_delegation {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
-        // sanity check: our calculated excess rent matches the user prior rent
-        if leftover_rent != user_unstaked_lamports {
+        // sanity check: our calculated new stake matches the user prior stake
+        if stake_added != pre_user_stake {
             return Err(SinglePoolError::UnexpectedMathError.into());
         }
 
@@ -756,7 +781,7 @@ impl Processor {
             user_lamport_account_info.clone(),
             clock_info.clone(),
             stake_history_info.clone(),
-            leftover_rent,
+            excess_lamports,
         )?;
 
         Ok(())
@@ -788,6 +813,10 @@ impl Processor {
         check_pool_mint_address(program_id, vote_account_address, pool_mint_info.key)?;
         check_token_program(token_program_info.key)?;
         check_stake_program(stake_program_info.key)?;
+
+        if pool_stake_info.key == user_stake_info.key {
+            return Err(SinglePoolError::InvalidPoolAccountUsage.into());
+        }
 
         let minimum_delegation = minimum_delegation()?;
 
@@ -886,11 +915,8 @@ impl Processor {
         }
 
         let vote_address_str = vote_account_address.to_string();
-        let token_name = format!(
-            "SPL S-Val Token ({}...{})",
-            &vote_address_str[0..4],
-            &vote_address_str[vote_address_str.len().saturating_sub(4)..vote_address_str.len()],
-        );
+        let token_name = format!("SPL Single Pool {}", &vote_address_str[0..15]);
+        let token_symbol = format!("s-{}", &vote_address_str[0..7]);
 
         let new_metadata_instruction = create_metadata_accounts_v3(
             *mpl_token_metadata_program_info.key,
@@ -900,7 +926,7 @@ impl Processor {
             *payer_info.key,
             *pool_authority_info.key,
             token_name,
-            "".to_string(),
+            token_symbol,
             "".to_string(),
             None,
             0,
