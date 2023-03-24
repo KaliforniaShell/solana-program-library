@@ -27,6 +27,8 @@ const MINT_DECIMALS: u8 = 9;
 const VOTE_STATE_START: usize = 4;
 const VOTE_STATE_END: usize = 36;
 
+const USER_STAKE_SEED: &str = "single-pool";
+
 fn find_address_and_bump(
     program_id: &Pubkey,
     vote_account_address: &Pubkey,
@@ -69,4 +71,12 @@ pub fn find_pool_authority_address(program_id: &Pubkey, vote_account_address: &P
 /// Find the canonical token mint address for a given vote account.
 pub fn find_pool_mint_address(program_id: &Pubkey, vote_account_address: &Pubkey) -> Pubkey {
     find_pool_mint_address_and_bump(program_id, vote_account_address).0
+}
+
+/// Find the address of the default intermediate account that holds activating user stake before deposit.
+pub fn find_default_deposit_account_address(
+    vote_account_address: &Pubkey,
+    user_wallet_address: &Pubkey,
+) -> Pubkey {
+    Pubkey::create_with_seed(vote_account_address, USER_STAKE_SEED, user_wallet_address).unwrap()
 }

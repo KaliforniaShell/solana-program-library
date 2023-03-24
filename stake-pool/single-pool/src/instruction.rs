@@ -3,7 +3,10 @@
 #![allow(clippy::too_many_arguments)]
 
 use {
-    crate::{find_pool_authority_address, find_pool_mint_address, find_pool_stake_address},
+    crate::{
+        find_default_deposit_account_address, find_pool_authority_address, find_pool_mint_address,
+        find_pool_stake_address, USER_STAKE_SEED,
+    },
     borsh::{BorshDeserialize, BorshSerialize},
     mpl_token_metadata::pda::find_metadata_account,
     solana_program::{
@@ -339,9 +342,24 @@ pub fn withdraw_stake(
     }
 }
 
-// TODO maybe have a helper function here that stakes for the user?
-// eg, creates instructions like create_independent_stake_account and delegate_stake_account
-// i havent checked if the stake program itself has helpers for this, but it might be nice
+/// Creates necessary instructions to create and delegate a new stake account to a given validator.
+/// Uses a fixed address for each wallet and vote account combination to make it easier to find for deposits.
+/// This is an optional helper function; deposits can come from any owned stake account without lockup.
+pub fn delegate(vote_account: &Pubkey, user_wallet: &Pubkey, lamports: u64) -> Vec<Instruction> {
+    stake::instruction::create_account_with_seed_and_delegate_stake(
+        user_wallet,
+        &find_default_deposit_account_address(vote_account, user_wallet),
+        vote_account,
+        USER_STAKE_SEED,
+        vote_account,
+        &stake::state::Authorized {
+            staker: *user_wallet,
+            withdrawer: *user_wallet,
+        },
+        &stake::state::Lockup::default(),
+        lamports,
+    )
+}
 
 /// Creates a `CreateTokenMetadata` instruction.
 pub fn create_token_metadata(
