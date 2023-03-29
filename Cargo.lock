@@ -6266,8 +6266,12 @@ dependencies = [
  "num-traits",
  "num_enum",
  "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "solana-vote-program",
  "spl-associated-token-account 1.1.2",
  "spl-token 3.5.0",
+ "test-case",
  "thiserror",
 ]
 
