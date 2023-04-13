@@ -14,7 +14,7 @@ use {
         signature::{Keypair, Signer},
         transaction::{Transaction, TransactionError},
     },
-    spl_single_validator_pool::{instruction, id},
+    spl_single_validator_pool::{id, instruction},
     test_case::test_case,
 };
 

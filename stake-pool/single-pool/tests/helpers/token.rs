@@ -29,7 +29,7 @@ use {
         vote_state::{VoteInit, VoteState, VoteStateVersions},
     },
     spl_associated_token_account as atoken, spl_single_validator_pool as spool,
-    spl_token::state::{Mint, Account},
+    spl_token::state::{Account, Mint},
     std::{convert::TryInto, num::NonZeroU32},
 };
 

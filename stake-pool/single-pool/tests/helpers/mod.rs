@@ -13,7 +13,9 @@ use {
         pubkey::Pubkey,
         stake, system_instruction, system_program,
     },
-    solana_program_test::{processor, BanksClient, ProgramTest, ProgramTestContext},
+    solana_program_test::{
+        processor, BanksClient, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
+    },
     solana_sdk::{
         account::{Account as SolanaAccount, WritableAccount},
         clock::{Clock, Epoch},
@@ -29,16 +31,26 @@ use {
         vote_state::{VoteInit, VoteState, VoteStateVersions},
     },
     spl_associated_token_account as atoken,
-    spl_single_validator_pool::{id, instruction, processor::Processor, find_pool_authority_address, find_pool_stake_address, find_pool_mint_address},
+    spl_single_validator_pool::{
+        find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
+        instruction, processor::Processor,
+    },
     std::{convert::TryInto, num::NonZeroU32},
 };
-
 
 pub mod token;
 pub use token::*;
 
 pub const FIRST_NORMAL_EPOCH: u64 = 15;
 pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
+
+pub async fn refresh_blockhash(context: &mut ProgramTestContext) {
+    context.last_blockhash = context
+        .banks_client
+        .get_new_latest_blockhash(&context.last_blockhash)
+        .await
+        .unwrap();
+}
 
 pub fn program_test() -> ProgramTest {
     let mut program_test = ProgramTest::default();
