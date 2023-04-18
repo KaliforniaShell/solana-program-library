@@ -83,6 +83,9 @@ pub struct SinglePoolAccounts {
 }
 impl SinglePoolAccounts {
     pub async fn initialize(&self, context: &mut ProgramTestContext) -> Result<(), TransportError> {
+        let first_normal_slot = context.genesis_config().epoch_schedule.first_normal_slot;
+        context.warp_to_slot(first_normal_slot).unwrap();
+
         create_vote(
             &mut context.banks_client,
             &context.payer,
@@ -172,6 +175,12 @@ impl Default for SinglePoolAccounts {
             token_program_id: spl_token::id(),
         }
     }
+}
+
+pub async fn advance_epoch(context: &mut ProgramTestContext) {
+    let root_slot = context.banks_client.get_root_slot().await.unwrap();
+    let slots_per_epoch = context.genesis_config().epoch_schedule.slots_per_epoch;
+    context.warp_to_slot(root_slot + slots_per_epoch).unwrap();
 }
 
 pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> SolanaAccount {
