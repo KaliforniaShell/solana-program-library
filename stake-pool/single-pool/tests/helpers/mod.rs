@@ -22,6 +22,7 @@ use {
         compute_budget::ComputeBudgetInstruction,
         feature_set::stake_allow_zero_undelegated_amount,
         message::Message,
+        native_token::LAMPORTS_PER_SOL,
         signature::{Keypair, Signer},
         transaction::Transaction,
         transport::TransportError,
@@ -42,7 +43,7 @@ pub mod token;
 pub use token::*;
 
 pub const FIRST_NORMAL_EPOCH: u64 = 15;
-pub const TEST_STAKE_AMOUNT: u64 = 1_500_000_000;
+pub const USER_STARTING_SOL: u64 = 100_000;
 
 pub async fn refresh_blockhash(context: &mut ProgramTestContext) {
     context.last_blockhash = context
@@ -74,6 +75,10 @@ pub struct SinglePoolAccounts {
     pub stake_account: Pubkey,
     pub authority: Pubkey,
     pub mint: Pubkey,
+    pub alice: Keypair,
+    pub bob: Keypair,
+    pub alice_token: Pubkey,
+    pub bob_token: Pubkey,
     pub token_program_id: Pubkey,
 }
 impl SinglePoolAccounts {
@@ -106,20 +111,64 @@ impl SinglePoolAccounts {
         context
             .banks_client
             .process_transaction(transaction)
-            .await
-            .map_err(|e| e.into())
+            .await?;
+
+        transfer(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+            &self.alice.pubkey(),
+            USER_STARTING_SOL * LAMPORTS_PER_SOL,
+        )
+        .await;
+
+        transfer(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+            &self.bob.pubkey(),
+            USER_STARTING_SOL * LAMPORTS_PER_SOL,
+        )
+        .await;
+
+        create_ata(
+            &mut context.banks_client,
+            &context.payer,
+            &self.alice.pubkey(),
+            &context.last_blockhash,
+            &self.mint,
+        )
+        .await;
+
+        create_ata(
+            &mut context.banks_client,
+            &context.payer,
+            &self.bob.pubkey(),
+            &context.last_blockhash,
+            &self.mint,
+        )
+        .await;
+
+        Ok(())
     }
 }
 impl Default for SinglePoolAccounts {
     fn default() -> Self {
         let vote_account = Keypair::new();
+        let alice = Keypair::new();
+        let bob = Keypair::new();
+        let mint = find_pool_mint_address(&id(), &vote_account.pubkey());
 
         Self {
             validator: Keypair::new(),
             authority: find_pool_authority_address(&id(), &vote_account.pubkey()),
             stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()),
-            mint: find_pool_mint_address(&id(), &vote_account.pubkey()),
+            mint,
             vote_account,
+            alice_token: atoken::get_associated_token_address(&alice.pubkey(), &mint),
+            bob_token: atoken::get_associated_token_address(&bob.pubkey(), &mint),
+            alice,
+            bob,
             token_program_id: spl_token::id(),
         }
     }

@@ -39,16 +39,13 @@ pub async fn create_ata(
     owner: &Pubkey,
     recent_blockhash: &Hash,
     pool_mint: &Pubkey,
-) -> Result<(), TransportError> {
+) {
     #[allow(deprecated)]
     let instruction = atoken::create_associated_token_account(&payer.pubkey(), owner, pool_mint);
     let message = Message::new(&[instruction], Some(&payer.pubkey()));
     let transaction = Transaction::new(&[payer], message, *recent_blockhash);
 
-    banks_client
-        .process_transaction(transaction)
-        .await
-        .map_err(|e| e.into())
+    banks_client.process_transaction(transaction).await.unwrap();
 }
 
 pub async fn get_token_balance(banks_client: &mut BanksClient, token: &Pubkey) -> u64 {
