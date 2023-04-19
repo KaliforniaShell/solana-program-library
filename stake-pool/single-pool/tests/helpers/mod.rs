@@ -2,6 +2,7 @@
 #![allow(unused_imports)] // FIXME remove
 
 use {
+    bincode::deserialize,
     borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
@@ -11,7 +12,8 @@ use {
         program_option::COption,
         program_pack::Pack,
         pubkey::Pubkey,
-        stake, system_instruction, system_program,
+        stake::{self, state::StakeState},
+        system_instruction, system_program,
     },
     solana_program_test::{
         processor, BanksClient, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
@@ -189,6 +191,17 @@ pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> Sol
         .await
         .expect("client error")
         .expect("account not found")
+}
+
+pub async fn get_stake_account(
+    banks_client: &mut BanksClient,
+    pubkey: &Pubkey,
+) -> (StakeState, u64) {
+    let stake_account = get_account(banks_client, pubkey).await;
+    let lamports = stake_account.lamports;
+    let stake = deserialize::<StakeState>(&stake_account.data).unwrap();
+
+    (stake, lamports)
 }
 
 pub async fn stake_get_minimum_delegation(

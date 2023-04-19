@@ -5,6 +5,7 @@
 mod helpers;
 
 use {
+    bincode::deserialize,
     borsh::BorshSerialize,
     helpers::*,
     solana_program::{
@@ -13,7 +14,8 @@ use {
         instruction::{AccountMeta, Instruction},
         program_pack::Pack,
         pubkey::Pubkey,
-        stake, system_instruction, sysvar,
+        stake::{self, state::StakeState},
+        system_instruction, sysvar,
     },
     solana_program_test::*,
     solana_sdk::{
@@ -36,12 +38,8 @@ async fn success() {
     accounts.initialize(&mut context).await.unwrap();
     let alice_stake = Keypair::new();
 
-    let lamps_before = context
-        .banks_client
-        .get_account(accounts.alice.pubkey())
+    let alice_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
         .await
-        .unwrap()
-        .unwrap()
         .lamports;
 
     create_independent_stake_account(
@@ -68,15 +66,17 @@ async fn success() {
     )
     .await;
 
-    let lamps_after_stake = context
-        .banks_client
-        .get_account(accounts.alice.pubkey())
-        .await
-        .unwrap()
-        .unwrap()
-        .lamports;
-
     advance_epoch(&mut context).await;
+
+    let alice_lamports_after_stake =
+        get_account(&mut context.banks_client, &accounts.alice.pubkey())
+            .await
+            .lamports;
+
+    let (alice_stake_before_deposit, alice_stake_lamports) =
+        get_stake_account(&mut context.banks_client, &alice_stake.pubkey()).await;
+    let (pool_stake_before, pool_lamports_before) =
+        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
 
     let instructions = spl_single_validator_pool::instruction::deposit(
         &id(),
@@ -102,19 +102,19 @@ async fn success() {
         .expect("get_account")
         .is_none());
 
-    let lamps_after_deposit = context
-        .banks_client
-        .get_account(accounts.alice.pubkey())
-        .await
-        .unwrap()
-        .unwrap()
-        .lamports;
+    let alice_lamports_after_deposit =
+        get_account(&mut context.banks_client, &accounts.alice.pubkey())
+            .await
+            .lamports;
 
-    // XXX note that below, you gain lamports from deposit. in pre-activate test, we lose lamports (because all are activated)
-    println!("HANA lamps before staking: {}\n     lamps after staking: {} ({} less than before, {} excluding stake)\n     lamps after deposit: {} ({} more than before)", lamps_before, lamps_after_stake, lamps_before - lamps_after_stake, lamps_before - lamps_after_stake - LAMPORTS_PER_SOL, lamps_after_deposit, lamps_after_deposit - lamps_after_stake);
+    let (pool_stake_after, pool_lamports_after) =
+        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+
+    //// XXX note that below, you gain lamports from deposit. in pre-activate test, we lose lamports (because all are activated)
+    //println!("HANA lamps before staking: {}\n     lamps after staking: {} ({} less than before, {} excluding stake)\n     lamps after deposit: {} ({} more than before)", lamps_before, lamps_after_stake, lamps_before - lamps_after_stake, lamps_before - lamps_after_stake - LAMPORTS_PER_SOL, lamps_after_deposit, lamps_after_deposit - lamps_after_stake);
 
     // TODO check balances (also remember to do the fuzzy thing with bals)
-    panic!("test");
+    //panic!("test");
 }
 
 // TODO deposit via seed, deposit during activation
