@@ -54,7 +54,7 @@ async fn success() {
             withdrawer: accounts.alice.pubkey(),
         },
         &stake::state::Lockup::default(),
-        1 * LAMPORTS_PER_SOL,
+        LAMPORTS_PER_SOL,
     )
     .await;
 
