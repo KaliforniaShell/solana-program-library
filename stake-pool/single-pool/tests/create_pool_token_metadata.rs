@@ -1,4 +1,5 @@
 #![allow(clippy::integer_arithmetic)]
+#![allow(unused_imports)] // FIXME remove
 #![cfg(feature = "test-sbf")]
 mod helpers;
 

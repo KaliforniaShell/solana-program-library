@@ -1,6 +1,6 @@
 #![allow(clippy::integer_arithmetic)]
-#![cfg(feature = "test-sbf")]
 #![allow(unused_imports)] // FIXME remove
+#![cfg(feature = "test-sbf")]
 
 mod helpers;
 
@@ -34,6 +34,7 @@ async fn success() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
     accounts.initialize(&mut context).await.unwrap();
+    let alice_stake = Keypair::new();
 
     let lamps_before = context
         .banks_client
@@ -42,14 +43,6 @@ async fn success() {
         .unwrap()
         .unwrap()
         .lamports;
-
-    let alice_stake = Keypair::new();
-    let lockup = stake::state::Lockup::default();
-
-    let authorized = stake::state::Authorized {
-        staker: accounts.alice.pubkey(),
-        withdrawer: accounts.alice.pubkey(),
-    };
 
     create_independent_stake_account(
         &mut context.banks_client,
@@ -121,6 +114,7 @@ async fn success() {
     println!("HANA lamps before staking: {}\n     lamps after staking: {} ({} less than before, {} excluding stake)\n     lamps after deposit: {} ({} more than before)", lamps_before, lamps_after_stake, lamps_before - lamps_after_stake, lamps_before - lamps_after_stake - LAMPORTS_PER_SOL, lamps_after_deposit, lamps_after_deposit - lamps_after_stake);
 
     // TODO check balances (also remember to do the fuzzy thing with bals)
+    panic!("test");
 }
 
 // TODO deposit via seed, deposit during activation
