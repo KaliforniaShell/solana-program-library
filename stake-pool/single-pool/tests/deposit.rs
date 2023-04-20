@@ -13,16 +13,19 @@ use {
         transaction::Transaction,
     },
     spl_single_validator_pool::{id, instruction},
+    test_case::test_case,
 };
 
-#[tokio::test]
-async fn success() {
-    let mut context = program_test().start_with_context().await;
+async fn setup(
+    context: &mut ProgramTestContext,
+    alice_amount: u64,
+    maybe_bob_amount: Option<u64>,
+) -> (SinglePoolAccounts, (Keypair, u64), Option<(Keypair, u64)>) {
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    accounts.initialize(context).await.unwrap();
     let alice_stake = Keypair::new();
 
-    let wallet_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
+    let alice_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
         .await
         .lamports;
 
@@ -36,7 +39,7 @@ async fn success() {
             withdrawer: accounts.alice.pubkey(),
         },
         &stake::state::Lockup::default(),
-        TEST_STAKE_AMOUNT,
+        alice_amount,
     )
     .await;
 
@@ -50,7 +53,56 @@ async fn success() {
     )
     .await;
 
-    advance_epoch(&mut context).await;
+    let bob_tuple = if let Some(bob_amount) = maybe_bob_amount {
+        let bob_stake = Keypair::new();
+
+        let bob_lamports_before = get_account(&mut context.banks_client, &accounts.bob.pubkey())
+            .await
+            .lamports;
+
+        create_independent_stake_account(
+            &mut context.banks_client,
+            &accounts.bob,
+            &context.last_blockhash,
+            &bob_stake,
+            &stake::state::Authorized {
+                staker: accounts.bob.pubkey(),
+                withdrawer: accounts.bob.pubkey(),
+            },
+            &stake::state::Lockup::default(),
+            bob_amount,
+        )
+        .await;
+
+        delegate_stake_account(
+            &mut context.banks_client,
+            &accounts.bob,
+            &context.last_blockhash,
+            &bob_stake.pubkey(),
+            &accounts.bob,
+            &accounts.vote_account.pubkey(),
+        )
+        .await;
+
+        Some((bob_stake, bob_lamports_before))
+    } else {
+        None
+    };
+
+    (accounts, (alice_stake, alice_lamports_before), bob_tuple)
+}
+
+#[test_case(true; "success-activated")]
+#[test_case(false; "success-activating")]
+#[tokio::test]
+async fn success(activate: bool) {
+    let mut context = program_test().start_with_context().await;
+    let (accounts, (alice_stake, wallet_lamports_before), _) =
+        setup(&mut context, TEST_STAKE_AMOUNT, None).await;
+
+    if activate {
+        advance_epoch(&mut context).await;
+    }
 
     let wallet_lamports_after_stake =
         get_account(&mut context.banks_client, &accounts.alice.pubkey())
@@ -102,34 +154,42 @@ async fn success() {
         .expect("get_account")
         .is_none());
 
-    // entire alice stake has moved to pool
-    assert_eq!(
-        pool_stake_before + alice_stake_before_deposit,
-        pool_stake_after
-    );
+    // when active, the depositor gets their rent back, but when activating, its just added to stake
+    let expected_deposit = if activate {
+        alice_stake_before_deposit
+    } else {
+        stake_lamports
+    };
+
+    // entire stake has moved to pool
+    assert_eq!(pool_stake_before + expected_deposit, pool_stake_after);
 
     // pool only gained stake
+    assert_eq!(pool_lamports_after, pool_lamports_before + expected_deposit,);
     assert_eq!(
         pool_lamports_after,
-        pool_lamports_before + TEST_STAKE_AMOUNT
-    );
-    assert_eq!(
-        pool_lamports_after,
-        pool_stake_before + TEST_STAKE_AMOUNT + pool_meta_after.rent_exempt_reserve
+        pool_stake_before + expected_deposit + pool_meta_after.rent_exempt_reserve
     );
 
-    // alice got her rent back
+    // alice got her rent back if active, or only paid fees otherwise
     assert_eq!(
         wallet_lamports_after_deposit,
-        wallet_lamports_before - TEST_STAKE_AMOUNT - fees
+        wallet_lamports_before - expected_deposit - fees
     );
 
     // alice got tokens. no rewards have been paid so tokens correspond to stake 1:1
     assert_eq!(
         get_token_balance(&mut context.banks_client, &accounts.alice_token).await,
-        TEST_STAKE_AMOUNT
+        expected_deposit,
     );
 }
 
-// TODO deposit via seed, deposit during activation, deposit with extra lamports mints them
+// TODO deposit via seed, deposit with extra lamports mints them
 // cannot deposit zero, cannot deposit from the deposit account
+// cannot deposit activated into activating, cannot deposit activating into activated
+
+// XXX TODO ok next i want to...
+// * maybe move setup into helpers as setup_for_deposit, use for withdraw tests
+// * test create_and_delegate_user_stake
+// * negative cases listed above and in withdraw
+// * test the token math stochastically

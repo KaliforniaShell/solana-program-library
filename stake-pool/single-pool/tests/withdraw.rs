@@ -140,4 +140,4 @@ async fn success() {
     );
 }
 
-// TODO withdraw after rewards, withdraw while activating
+// TODO withdraw after rewards, withdraw while activating, withdraw after another deposit
