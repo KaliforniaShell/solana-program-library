@@ -1,30 +1,29 @@
 #![allow(clippy::integer_arithmetic)]
-#![allow(unused_imports)] // FIXME remove
 #![cfg(feature = "test-sbf")]
+
 mod helpers;
 
 use {
     helpers::*,
     mpl_token_metadata::{
         state::Metadata,
-        state::{MAX_NAME_LENGTH, MAX_SYMBOL_LENGTH, MAX_URI_LENGTH},
+        state::{MAX_NAME_LENGTH, MAX_SYMBOL_LENGTH},
         utils::puffed_out_string,
     },
-    solana_program::instruction::InstructionError,
     solana_program_test::*,
-    solana_sdk::{
-        message::Message,
-        signature::{Keypair, Signer},
-        transaction::{Transaction, TransactionError},
-    },
+    solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer, transaction::Transaction},
     spl_single_validator_pool::{id, instruction},
-    test_case::test_case,
 };
 
-fn assert_metadata(metadata: &Metadata) {
-    // TODO match the actual strings once we decide on them
-    assert!(!metadata.data.name.is_empty());
-    assert!(!metadata.data.symbol.is_empty());
+fn assert_metadata(vote_account: &Pubkey, metadata: &Metadata) {
+    let vote_address_str = vote_account.to_string();
+    let name = format!("SPL Single Pool {}", &vote_address_str[0..15]);
+    let symbol = format!("st{}", &vote_address_str[0..7]);
+    let puffy_name = puffed_out_string(&name, MAX_NAME_LENGTH);
+    let puffy_symbol = puffed_out_string(&symbol, MAX_SYMBOL_LENGTH);
+
+    assert_eq!(metadata.data.name, puffy_name);
+    assert_eq!(metadata.data.symbol, puffy_symbol);
 }
 
 #[tokio::test]
@@ -34,7 +33,7 @@ async fn success() {
     accounts.initialize(&mut context).await.unwrap();
 
     let metadata = get_metadata_account(&mut context.banks_client, &accounts.mint).await;
-    assert_metadata(&metadata);
+    assert_metadata(&accounts.vote_account.pubkey(), &metadata);
 }
 
 #[tokio::test]

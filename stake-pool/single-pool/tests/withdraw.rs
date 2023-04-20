@@ -1,34 +1,18 @@
 #![allow(clippy::integer_arithmetic)]
-#![allow(unused_imports)] // FIXME remove
 #![cfg(feature = "test-sbf")]
 
 mod helpers;
 
 use {
-    bincode::deserialize,
-    borsh::BorshSerialize,
     helpers::*,
-    solana_program::{
-        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
-        hash::Hash,
-        instruction::{AccountMeta, Instruction},
-        program_pack::Pack,
-        pubkey::Pubkey,
-        stake::{self, state::StakeState},
-        system_instruction, sysvar,
-    },
+    solana_program::stake,
     solana_program_test::*,
     solana_sdk::{
-        instruction::InstructionError,
         message::Message,
-        native_token::LAMPORTS_PER_SOL,
         signature::{Keypair, Signer},
-        transaction::{Transaction, TransactionError},
-        transport::TransportError,
+        transaction::Transaction,
     },
     spl_single_validator_pool::{id, instruction},
-    spl_token::state::{Account, Mint},
-    test_case::test_case,
 };
 
 #[tokio::test]
@@ -64,7 +48,7 @@ async fn success() {
 
     advance_epoch(&mut context).await;
 
-    let instructions = spl_single_validator_pool::instruction::deposit(
+    let instructions = instruction::deposit(
         &id(),
         &accounts.vote_account.pubkey(),
         &alice_stake.pubkey(),
@@ -97,7 +81,7 @@ async fn success() {
         .await
         .lamports;
 
-    let instructions = spl_single_validator_pool::instruction::withdraw(
+    let instructions = instruction::withdraw(
         &id(),
         &accounts.vote_account.pubkey(),
         &alice_stake.pubkey(),

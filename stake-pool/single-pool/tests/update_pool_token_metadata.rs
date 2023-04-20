@@ -1,5 +1,4 @@
 #![allow(clippy::integer_arithmetic)]
-#![allow(unused_imports)] // FIXME remove
 #![cfg(feature = "test-sbf")]
 mod helpers;
 
@@ -9,14 +8,9 @@ use {
         state::{MAX_NAME_LENGTH, MAX_SYMBOL_LENGTH, MAX_URI_LENGTH},
         utils::puffed_out_string,
     },
-    solana_program::instruction::InstructionError,
     solana_program_test::*,
-    solana_sdk::{
-        signature::{Keypair, Signer},
-        transaction::{Transaction, TransactionError},
-    },
+    solana_sdk::{signature::Signer, transaction::Transaction},
     spl_single_validator_pool::{id, instruction},
-    test_case::test_case,
 };
 
 #[tokio::test]

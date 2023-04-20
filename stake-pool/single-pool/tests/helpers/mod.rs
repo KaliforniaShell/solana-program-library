@@ -1,16 +1,9 @@
-#![allow(dead_code)]
-#![allow(unused_imports)] // FIXME remove
+#![allow(dead_code)] // needed because cargo doesnt understand test usage
 
 use {
     bincode::deserialize,
-    borsh::BorshSerialize,
-    mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
-        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
         hash::Hash,
-        instruction::Instruction,
-        program_option::COption,
-        program_pack::Pack,
         pubkey::Pubkey,
         stake::{
             self,
@@ -22,9 +15,7 @@ use {
         processor, BanksClient, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
     },
     solana_sdk::{
-        account::{Account as SolanaAccount, WritableAccount},
-        clock::{Clock, Epoch},
-        compute_budget::ComputeBudgetInstruction,
+        account::Account as SolanaAccount,
         feature_set::stake_allow_zero_undelegated_amount,
         message::Message,
         native_token::LAMPORTS_PER_SOL,
@@ -34,14 +25,14 @@ use {
     },
     solana_vote_program::{
         self, vote_instruction,
-        vote_state::{VoteInit, VoteState, VoteStateVersions},
+        vote_state::{VoteInit, VoteState},
     },
     spl_associated_token_account as atoken,
     spl_single_validator_pool::{
         find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
         instruction, processor::Processor,
     },
-    std::{convert::TryInto, num::NonZeroU32},
+    std::convert::TryInto,
 };
 
 pub mod token;

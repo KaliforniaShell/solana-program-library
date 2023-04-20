@@ -1,31 +1,15 @@
 #![allow(clippy::integer_arithmetic)]
-#![allow(unused_imports)] // FIXME remove
 #![cfg(feature = "test-sbf")]
 
 mod helpers;
 
 use {
-    borsh::BorshSerialize,
     helpers::*,
-    solana_program::{
-        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
-        hash::Hash,
-        instruction::{AccountMeta, Instruction},
-        program_pack::Pack,
-        pubkey::Pubkey,
-        stake, system_instruction, sysvar,
-    },
+    solana_program::{program_pack::Pack, stake},
     solana_program_test::*,
-    solana_sdk::{
-        instruction::InstructionError,
-        message::Message,
-        signature::{Keypair, Signer},
-        transaction::{Transaction, TransactionError},
-        transport::TransportError,
-    },
+    solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
     spl_single_validator_pool::{id, instruction},
-    spl_token::state::{Account, Mint},
-    test_case::test_case,
+    spl_token::state::Mint,
 };
 
 #[tokio::test]

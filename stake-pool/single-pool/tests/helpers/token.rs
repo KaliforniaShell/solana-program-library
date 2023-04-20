@@ -1,36 +1,18 @@
 #![allow(dead_code)]
-#![allow(unused_imports)] // FIXME remove
 
 use {
-    borsh::BorshSerialize,
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
     solana_program::{
-        borsh::{get_instance_packed_len, get_packed_len, try_from_slice_unchecked},
-        hash::Hash,
-        instruction::Instruction,
-        program_option::COption,
-        program_pack::Pack,
-        pubkey::Pubkey,
-        stake, system_instruction, system_program,
+        borsh::try_from_slice_unchecked, hash::Hash, program_pack::Pack, pubkey::Pubkey,
     },
-    solana_program_test::{processor, BanksClient, ProgramTest, ProgramTestContext},
+    solana_program_test::BanksClient,
     solana_sdk::{
-        account::{Account as SolanaAccount, WritableAccount},
-        clock::{Clock, Epoch},
-        compute_budget::ComputeBudgetInstruction,
-        feature_set::stake_raise_minimum_delegation_to_1_sol,
         message::Message,
         signature::{Keypair, Signer},
         transaction::Transaction,
-        transport::TransportError,
     },
-    solana_vote_program::{
-        self, vote_instruction,
-        vote_state::{VoteInit, VoteState, VoteStateVersions},
-    },
-    spl_associated_token_account as atoken, spl_single_validator_pool as spool,
+    spl_associated_token_account as atoken,
     spl_token::state::{Account, Mint},
-    std::{convert::TryInto, num::NonZeroU32},
 };
 
 pub async fn create_ata(
