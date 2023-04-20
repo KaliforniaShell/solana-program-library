@@ -38,7 +38,7 @@ async fn success() {
     accounts.initialize(&mut context).await.unwrap();
     let alice_stake = Keypair::new();
 
-    let alice_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
+    let wallet_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
         .await
         .lamports;
 
@@ -52,7 +52,7 @@ async fn success() {
             withdrawer: accounts.alice.pubkey(),
         },
         &stake::state::Lockup::default(),
-        LAMPORTS_PER_SOL,
+        TEST_STAKE_AMOUNT,
     )
     .await;
 
@@ -68,15 +68,20 @@ async fn success() {
 
     advance_epoch(&mut context).await;
 
-    let alice_lamports_after_stake =
+    let wallet_lamports_after_stake =
         get_account(&mut context.banks_client, &accounts.alice.pubkey())
             .await
             .lamports;
 
-    let (alice_stake_before_deposit, alice_stake_lamports) =
+    let (_, alice_stake_before_deposit, stake_lamports) =
         get_stake_account(&mut context.banks_client, &alice_stake.pubkey()).await;
-    let (pool_stake_before, pool_lamports_before) =
+    let alice_stake_before_deposit = alice_stake_before_deposit.unwrap().delegation.stake;
+
+    let (_, pool_stake_before, pool_lamports_before) =
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+    let pool_stake_before = pool_stake_before.unwrap().delegation.stake;
+
+    let mut fees = wallet_lamports_before - wallet_lamports_after_stake - stake_lamports;
 
     let instructions = spl_single_validator_pool::instruction::deposit(
         &id(),
@@ -87,6 +92,7 @@ async fn success() {
         &accounts.alice.pubkey(),
     );
     let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
+    fees += get_fee_for_message(&mut context.banks_client, &message).await;
     let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
 
     context
@@ -95,6 +101,16 @@ async fn success() {
         .await
         .unwrap();
 
+    let wallet_lamports_after_deposit =
+        get_account(&mut context.banks_client, &accounts.alice.pubkey())
+            .await
+            .lamports;
+
+    let (pool_meta_after, pool_stake_after, pool_lamports_after) =
+        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+    let pool_stake_after = pool_stake_after.unwrap().delegation.stake;
+
+    // deposit stake account is closed
     assert!(context
         .banks_client
         .get_account(alice_stake.pubkey())
@@ -102,19 +118,34 @@ async fn success() {
         .expect("get_account")
         .is_none());
 
-    let alice_lamports_after_deposit =
-        get_account(&mut context.banks_client, &accounts.alice.pubkey())
-            .await
-            .lamports;
+    // entire alice stake has moved to pool
+    assert_eq!(
+        pool_stake_before + alice_stake_before_deposit,
+        pool_stake_after
+    );
 
-    let (pool_stake_after, pool_lamports_after) =
-        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+    // pool only gained stake
+    assert_eq!(
+        pool_lamports_after,
+        pool_lamports_before + TEST_STAKE_AMOUNT
+    );
+    assert_eq!(
+        pool_lamports_after,
+        pool_stake_before + TEST_STAKE_AMOUNT + pool_meta_after.rent_exempt_reserve
+    );
 
-    //// XXX note that below, you gain lamports from deposit. in pre-activate test, we lose lamports (because all are activated)
-    //println!("HANA lamps before staking: {}\n     lamps after staking: {} ({} less than before, {} excluding stake)\n     lamps after deposit: {} ({} more than before)", lamps_before, lamps_after_stake, lamps_before - lamps_after_stake, lamps_before - lamps_after_stake - LAMPORTS_PER_SOL, lamps_after_deposit, lamps_after_deposit - lamps_after_stake);
+    // alice got her rent back
+    assert_eq!(
+        wallet_lamports_after_deposit,
+        wallet_lamports_before - TEST_STAKE_AMOUNT - fees
+    );
 
-    // TODO check balances (also remember to do the fuzzy thing with bals)
-    //panic!("test");
+    // alice got tokens. no rewards have been paid so tokens correspond to stake 1:1
+    assert_eq!(
+        get_token_balance(&mut context.banks_client, &accounts.alice_token).await,
+        TEST_STAKE_AMOUNT
+    );
 }
 
-// TODO deposit via seed, deposit during activation
+// TODO deposit via seed, deposit during activation, deposit with extra lamports mints them
+// cannot deposit zero, cannot deposit from the deposit account

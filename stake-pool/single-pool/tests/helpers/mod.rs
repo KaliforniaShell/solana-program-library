@@ -12,7 +12,10 @@ use {
         program_option::COption,
         program_pack::Pack,
         pubkey::Pubkey,
-        stake::{self, state::StakeState},
+        stake::{
+            self,
+            state::{Meta, Stake, StakeState},
+        },
         system_instruction, system_program,
     },
     solana_program_test::{
@@ -46,6 +49,8 @@ pub use token::*;
 
 pub const FIRST_NORMAL_EPOCH: u64 = 15;
 pub const USER_STARTING_SOL: u64 = 100_000;
+pub const TEST_STAKE_AMOUNT: u64 = 10_000_000_000; // 10 sol
+pub const MINIMUM_STAKE_AMOUNT: u64 = LAMPORTS_PER_SOL; // XXX get this for real later
 
 pub async fn refresh_blockhash(context: &mut ProgramTestContext) {
     context.last_blockhash = context
@@ -196,12 +201,21 @@ pub async fn get_account(banks_client: &mut BanksClient, pubkey: &Pubkey) -> Sol
 pub async fn get_stake_account(
     banks_client: &mut BanksClient,
     pubkey: &Pubkey,
-) -> (StakeState, u64) {
+) -> (Meta, Option<Stake>, u64) {
     let stake_account = get_account(banks_client, pubkey).await;
     let lamports = stake_account.lamports;
-    let stake = deserialize::<StakeState>(&stake_account.data).unwrap();
+    match deserialize::<StakeState>(&stake_account.data).unwrap() {
+        StakeState::Initialized(meta) => (meta, None, lamports),
+        StakeState::Stake(meta, stake) => (meta, Some(stake), lamports),
+        _ => unimplemented!(),
+    }
+}
 
-    (stake, lamports)
+// XXX using this unless i figure out how tf to get tarpc::context::Context
+#[allow(deprecated)]
+pub async fn get_fee_for_message(banks_client: &mut BanksClient, message: &Message) -> u64 {
+    let (fee_calculator, _, _) = banks_client.get_fees().await.unwrap();
+    fee_calculator.calculate_fee(message)
 }
 
 pub async fn stake_get_minimum_delegation(
