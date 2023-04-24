@@ -109,12 +109,39 @@ async fn success(activate: bool) {
     );
 }
 
+#[test_case(true; "fail-autodeposit-activated")]
+#[test_case(false; "fail-autodeposit-activating")]
+#[tokio::test]
+async fn fail_autodeposit(activate: bool) {
+    let mut context = program_test().start_with_context().await;
+    let accounts = SinglePoolAccounts::default();
+    accounts.initialize(&mut context).await;
+
+    if activate {
+        advance_epoch(&mut context).await;
+    }
+
+    let instruction = instruction::deposit_stake(
+        &id(),
+        &accounts.vote_account.pubkey(),
+        &accounts.stake_account,
+        &accounts.alice_token,
+        &accounts.alice.pubkey(),
+    );
+    let message = Message::new(&[instruction], Some(&accounts.alice.pubkey()));
+    let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
+
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap_err();
+}
+
 // TODO deposit via seed, deposit with extra lamports mints them
-// cannot deposit zero, cannot deposit from the deposit account
 // cannot deposit activated into activating, cannot deposit activating into activated
 
 // XXX TODO ok next i want to...
-// * maybe move setup into helpers as setup_for_deposit, use for withdraw tests
 // * test create_and_delegate_user_stake
 // * negative cases listed above and in withdraw
 // * test the token math stochastically
