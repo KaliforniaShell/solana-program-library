@@ -17,7 +17,7 @@ use {
 async fn success_update_pool_token_metadata() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    accounts.initialize(&mut context).await;
 
     let updated_name = "updated_name";
     let updated_symbol = "USYM";

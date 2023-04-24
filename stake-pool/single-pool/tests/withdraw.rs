@@ -19,7 +19,7 @@ use {
 async fn success() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    let minimum_delegation = accounts.initialize(&mut context).await.unwrap();
+    let minimum_delegation = accounts.initialize(&mut context).await;
     let alice_stake = Keypair::new();
 
     create_independent_stake_account(

@@ -11,8 +11,8 @@ use {
         message::Message,
         native_token::LAMPORTS_PER_SOL,
         signature::{Keypair, Signer},
+        stake::state::{Authorized, Lockup},
         transaction::Transaction,
-        transport::TransportError,
     },
     solana_vote_program::{
         self, vote_instruction,
@@ -58,15 +58,79 @@ pub struct SinglePoolAccounts {
     pub mint: Pubkey,
     pub alice: Keypair,
     pub bob: Keypair,
+    pub alice_stake: Keypair,
+    pub bob_stake: Keypair,
     pub alice_token: Pubkey,
     pub bob_token: Pubkey,
     pub token_program_id: Pubkey,
 }
 impl SinglePoolAccounts {
-    pub async fn initialize(
+    // does everything in initialize plus creates/delegates one or both stake accounts for our users
+    // note this does not advance time, so everything is in an activating state
+    pub async fn initialize_for_deposit(
         &self,
         context: &mut ProgramTestContext,
-    ) -> Result<u64, TransportError> {
+        alice_amount: u64,
+        maybe_bob_amount: Option<u64>,
+    ) -> u64 {
+        let minimum_delegation = self.initialize(context).await;
+
+        create_independent_stake_account(
+            &mut context.banks_client,
+            &self.alice,
+            &context.last_blockhash,
+            &self.alice_stake,
+            &Authorized {
+                staker: self.alice.pubkey(),
+                withdrawer: self.alice.pubkey(),
+            },
+            &Lockup::default(),
+            alice_amount,
+        )
+        .await;
+
+        delegate_stake_account(
+            &mut context.banks_client,
+            &self.alice,
+            &context.last_blockhash,
+            &self.alice_stake.pubkey(),
+            &self.alice,
+            &self.vote_account.pubkey(),
+        )
+        .await;
+
+        if let Some(bob_amount) = maybe_bob_amount {
+            create_independent_stake_account(
+                &mut context.banks_client,
+                &self.bob,
+                &context.last_blockhash,
+                &self.bob_stake,
+                &Authorized {
+                    staker: self.bob.pubkey(),
+                    withdrawer: self.bob.pubkey(),
+                },
+                &Lockup::default(),
+                bob_amount,
+            )
+            .await;
+
+            delegate_stake_account(
+                &mut context.banks_client,
+                &self.bob,
+                &context.last_blockhash,
+                &self.bob_stake.pubkey(),
+                &self.bob,
+                &self.vote_account.pubkey(),
+            )
+            .await;
+        };
+
+        minimum_delegation
+    }
+
+    // creates a vote account and stake pool for it. also sets up two users with sol and token accounts
+    // note this leaves the pool in an activating state. caller can advance to next epoch if they please
+    pub async fn initialize(&self, context: &mut ProgramTestContext) -> u64 {
         let first_normal_slot = context.genesis_config().epoch_schedule.first_normal_slot;
         context.warp_to_slot(first_normal_slot).unwrap();
 
@@ -100,7 +164,8 @@ impl SinglePoolAccounts {
         context
             .banks_client
             .process_transaction(transaction)
-            .await?;
+            .await
+            .unwrap();
 
         transfer(
             &mut context.banks_client,
@@ -138,7 +203,7 @@ impl SinglePoolAccounts {
         )
         .await;
 
-        Ok(minimum_delegation)
+        minimum_delegation
     }
 }
 impl Default for SinglePoolAccounts {
@@ -154,6 +219,8 @@ impl Default for SinglePoolAccounts {
             stake_account: find_pool_stake_address(&id(), &vote_account.pubkey()),
             mint,
             vote_account,
+            alice_stake: Keypair::new(),
+            bob_stake: Keypair::new(),
             alice_token: atoken::get_associated_token_address(&alice.pubkey(), &mint),
             bob_token: atoken::get_associated_token_address(&bob.pubkey(), &mint),
             alice,

@@ -16,7 +16,7 @@ use {
 async fn success() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    accounts.initialize(&mut context).await;
 
     // mint exists
     let mint_account = get_account(&mut context.banks_client, &accounts.mint).await;
@@ -31,7 +31,7 @@ async fn success() {
 async fn fail_double_init() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    let minimum_delegation = accounts.initialize(&mut context).await.unwrap();
+    let minimum_delegation = accounts.initialize(&mut context).await;
     refresh_blockhash(&mut context).await;
 
     let rent = context.banks_client.get_rent().await.unwrap();

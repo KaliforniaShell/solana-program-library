@@ -30,7 +30,7 @@ fn assert_metadata(vote_account: &Pubkey, metadata: &Metadata) {
 async fn success() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    accounts.initialize(&mut context).await;
 
     let metadata = get_metadata_account(&mut context.banks_client, &accounts.mint).await;
     assert_metadata(&accounts.vote_account.pubkey(), &metadata);
@@ -40,7 +40,7 @@ async fn success() {
 async fn fail_double_init() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    accounts.initialize(&mut context).await;
     refresh_blockhash(&mut context).await;
 
     let instruction = instruction::create_token_metadata(
