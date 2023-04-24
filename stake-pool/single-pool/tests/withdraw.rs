@@ -5,53 +5,34 @@ mod helpers;
 
 use {
     helpers::*,
-    solana_program::stake,
     solana_program_test::*,
-    solana_sdk::{
-        message::Message,
-        signature::{Keypair, Signer},
-        transaction::Transaction,
-    },
+    solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
     spl_single_validator_pool::{id, instruction},
+    test_case::test_case,
 };
 
+#[test_case(true; "success-activated")]
+#[test_case(false; "success-activating")]
 #[tokio::test]
-async fn success() {
+async fn success(activate: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    let minimum_delegation = accounts.initialize(&mut context).await;
-    let alice_stake = Keypair::new();
+    let minimum_delegation = accounts
+        .initialize_for_deposit(&mut context, TEST_STAKE_AMOUNT, None)
+        .await;
 
-    create_independent_stake_account(
-        &mut context.banks_client,
-        &accounts.alice,
-        &context.last_blockhash,
-        &alice_stake,
-        &stake::state::Authorized {
-            staker: accounts.alice.pubkey(),
-            withdrawer: accounts.alice.pubkey(),
-        },
-        &stake::state::Lockup::default(),
-        TEST_STAKE_AMOUNT,
-    )
-    .await;
+    if activate {
+        advance_epoch(&mut context).await;
+    }
 
-    delegate_stake_account(
-        &mut context.banks_client,
-        &accounts.alice,
-        &context.last_blockhash,
-        &alice_stake.pubkey(),
-        &accounts.alice,
-        &accounts.vote_account.pubkey(),
-    )
-    .await;
-
-    advance_epoch(&mut context).await;
+    let (_, alice_stake_before_deposit, stake_lamports) =
+        get_stake_account(&mut context.banks_client, &accounts.alice_stake.pubkey()).await;
+    let alice_stake_before_deposit = alice_stake_before_deposit.unwrap().delegation.stake;
 
     let instructions = instruction::deposit(
         &id(),
         &accounts.vote_account.pubkey(),
-        &alice_stake.pubkey(),
+        &accounts.alice_stake.pubkey(),
         &accounts.alice_token,
         &accounts.alice.pubkey(),
         &accounts.alice.pubkey(),
@@ -73,7 +54,7 @@ async fn success() {
         &mut context.banks_client,
         &accounts.alice,
         &context.last_blockhash,
-        &alice_stake,
+        &accounts.alice_stake,
     )
     .await;
 
@@ -84,11 +65,11 @@ async fn success() {
     let instructions = instruction::withdraw(
         &id(),
         &accounts.vote_account.pubkey(),
-        &alice_stake.pubkey(),
+        &accounts.alice_stake.pubkey(),
         &accounts.alice.pubkey(),
         &accounts.alice_token,
         &accounts.alice.pubkey(),
-        TEST_STAKE_AMOUNT,
+        get_token_balance(&mut context.banks_client, &accounts.alice_token).await,
     );
     let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
     let fees = get_fee_for_message(&mut context.banks_client, &message).await;
@@ -105,27 +86,32 @@ async fn success() {
         .lamports;
 
     let (_, alice_stake_after, _) =
-        get_stake_account(&mut context.banks_client, &alice_stake.pubkey()).await;
+        get_stake_account(&mut context.banks_client, &accounts.alice_stake.pubkey()).await;
     let alice_stake_after = alice_stake_after.unwrap().delegation.stake;
 
     let (_, pool_stake_after, pool_lamports_after) =
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
     let pool_stake_after = pool_stake_after.unwrap().delegation.stake;
 
+    // when active, the depositor gets their rent back, but when activating, its just added to stake
+    let expected_deposit = if activate {
+        alice_stake_before_deposit
+    } else {
+        stake_lamports
+    };
+
     // alice received her stake back
-    assert_eq!(alice_stake_after, TEST_STAKE_AMOUNT);
+    assert_eq!(alice_stake_after, expected_deposit);
 
     // alice paid chain fee for withdraw and nothing else
+    // (we create the blank account before getting wallet_lamports_before)
     assert_eq!(wallet_lamports_after, wallet_lamports_before - fees);
 
     // pool retains minstake
     assert_eq!(pool_stake_after, minimum_delegation);
 
     // pool lamports otherwise unchanged
-    assert_eq!(
-        pool_lamports_after,
-        pool_lamports_before - TEST_STAKE_AMOUNT
-    );
+    assert_eq!(pool_lamports_after, pool_lamports_before - expected_deposit,);
 
     // alice has no tokens
     assert_eq!(
