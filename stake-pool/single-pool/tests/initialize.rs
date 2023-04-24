@@ -31,7 +31,7 @@ async fn success() {
 async fn fail_double_init() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    let minimum_delegation = accounts.initialize(&mut context).await.unwrap();
     refresh_blockhash(&mut context).await;
 
     let rent = context.banks_client.get_rent().await.unwrap();
@@ -40,12 +40,7 @@ async fn fail_double_init() {
         &accounts.vote_account.pubkey(),
         &context.payer.pubkey(),
         &rent,
-        stake_get_minimum_delegation(
-            &mut context.banks_client,
-            &context.payer,
-            &context.last_blockhash,
-        )
-        .await,
+        minimum_delegation,
     );
     let message = Message::new(&instructions, Some(&context.payer.pubkey()));
     let transaction = Transaction::new(&[&context.payer], message, context.last_blockhash);

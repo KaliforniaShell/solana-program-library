@@ -19,7 +19,7 @@ use {
 async fn success() {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await.unwrap();
+    let minimum_delegation = accounts.initialize(&mut context).await.unwrap();
     let alice_stake = Keypair::new();
 
     create_independent_stake_account(
@@ -119,7 +119,7 @@ async fn success() {
     assert_eq!(wallet_lamports_after, wallet_lamports_before - fees);
 
     // pool retains minstake
-    assert_eq!(pool_stake_after, MINIMUM_STAKE_AMOUNT);
+    assert_eq!(pool_stake_after, minimum_delegation);
 
     // pool lamports otherwise unchanged
     assert_eq!(
