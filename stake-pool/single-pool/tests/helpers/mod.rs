@@ -32,7 +32,7 @@ pub mod stake;
 pub use stake::*;
 
 pub const FIRST_NORMAL_EPOCH: u64 = 15;
-pub const USER_STARTING_SOL: u64 = 100_000;
+pub const USER_STARTING_LAMPORTS: u64 = 100_000_000_000_000; // 10k sol
 
 pub fn program_test() -> ProgramTest {
     let mut program_test = ProgramTest::default();
@@ -172,7 +172,7 @@ impl SinglePoolAccounts {
             &context.payer,
             &context.last_blockhash,
             &self.alice.pubkey(),
-            USER_STARTING_SOL * LAMPORTS_PER_SOL,
+            USER_STARTING_LAMPORTS,
         )
         .await;
 
@@ -181,7 +181,7 @@ impl SinglePoolAccounts {
             &context.payer,
             &context.last_blockhash,
             &self.bob.pubkey(),
-            USER_STARTING_SOL * LAMPORTS_PER_SOL,
+            USER_STARTING_LAMPORTS,
         )
         .await;
 
