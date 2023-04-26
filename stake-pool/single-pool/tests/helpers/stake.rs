@@ -3,18 +3,16 @@
 use {
     crate::get_account,
     bincode::deserialize,
-    solana_program::{
+    solana_program_test::BanksClient,
+    solana_sdk::{
         hash::Hash,
         pubkey::Pubkey,
+        signature::{Keypair, Signer},
         stake::{
             self,
             state::{Meta, Stake, StakeState},
         },
         system_instruction,
-    },
-    solana_program_test::BanksClient,
-    solana_sdk::{
-        signature::{Keypair, Signer},
         transaction::Transaction,
     },
     std::convert::TryInto,

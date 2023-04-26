@@ -1,17 +1,18 @@
 #![allow(dead_code)] // needed because cargo doesnt understand test usage
 
 use {
-    solana_program::{hash::Hash, pubkey::Pubkey, system_instruction, system_program},
-    solana_program_test::{
-        processor, BanksClient, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
-    },
+    solana_program_test::*,
     solana_sdk::{
         account::Account as SolanaAccount,
         feature_set::stake_allow_zero_undelegated_amount,
+        hash::Hash,
         message::Message,
+        program_error::ProgramError,
+        pubkey::Pubkey,
         signature::{Keypair, Signer},
         stake::state::{Authorized, Lockup},
-        transaction::Transaction,
+        system_instruction, system_program,
+        transaction::{Transaction, TransactionError},
     },
     solana_vote_program::{
         self, vote_instruction,
@@ -19,8 +20,8 @@ use {
     },
     spl_associated_token_account as atoken,
     spl_single_validator_pool::{
-        find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
-        instruction, processor::Processor,
+        error::SinglePoolError, find_pool_authority_address, find_pool_mint_address,
+        find_pool_stake_address, id, instruction, processor::Processor,
     },
 };
 
@@ -293,7 +294,9 @@ pub async fn create_vote(
         &[validator, vote, payer],
         *recent_blockhash,
     );
-    banks_client.process_transaction(transaction).await.unwrap();
+
+    // ignore errors for idempotency
+    let _ = banks_client.process_transaction(transaction).await;
 }
 
 pub async fn transfer(
@@ -314,4 +317,25 @@ pub async fn transfer(
         *recent_blockhash,
     );
     banks_client.process_transaction(transaction).await.unwrap();
+}
+
+pub fn check_error(got: BanksClientError, expected: SinglePoolError) {
+    // banks error -> transaction error -> instruction error -> program error
+    // XXX if theres a less stupid way feel free to tell me lol
+    let got_p = if let TransactionError::InstructionError(_, e) = got.unwrap() {
+        ProgramError::try_from(e).unwrap()
+    } else {
+        panic!(
+            "couldnt convert {:?} to ProgramError (expected {:?})",
+            got, expected
+        );
+    };
+    let expected_p = expected.clone().into();
+
+    if got_p != expected_p {
+        panic!(
+            "error comparison failed!\n\nGOT: {:#?} / ({:?})\n\nEXPECTED: {:#?} / ({:?})\n\n",
+            got, got_p, expected, expected_p
+        );
+    }
 }

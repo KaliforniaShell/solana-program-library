@@ -6,8 +6,15 @@ mod helpers;
 use {
     helpers::*,
     solana_program_test::*,
-    solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
-    spl_single_validator_pool::{find_default_deposit_account_address, id, instruction},
+    solana_sdk::{
+        message::Message,
+        signature::Signer,
+        stake::state::{Authorized, Lockup},
+        transaction::Transaction,
+    },
+    spl_single_validator_pool::{
+        error::SinglePoolError, find_default_deposit_account_address, id, instruction,
+    },
     test_case::test_case,
 };
 
@@ -230,11 +237,88 @@ async fn fail_autodeposit(activate: bool) {
         advance_epoch(&mut context).await;
     }
 
-    context
+    let e = context
         .banks_client
         .process_transaction(transaction)
         .await
         .unwrap_err();
+    check_error(e, SinglePoolError::InvalidPoolAccountUsage);
+}
+
+#[test_case(true; "pool_active")]
+#[test_case(false; "user_active")]
+#[tokio::test]
+async fn fail_activation_mismatch(pool_first: bool) {
+    let mut context = program_test().start_with_context().await;
+    let accounts = SinglePoolAccounts::default();
+
+    let minimum_delegation = get_minimum_delegation(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+    )
+    .await;
+
+    create_vote(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &accounts.validator,
+        &accounts.vote_account,
+    )
+    .await;
+
+    if pool_first {
+        accounts.initialize(&mut context).await;
+        advance_epoch(&mut context).await;
+    }
+
+    create_independent_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &accounts.alice_stake,
+        &Authorized {
+            staker: accounts.alice.pubkey(),
+            withdrawer: accounts.alice.pubkey(),
+        },
+        &Lockup::default(),
+        minimum_delegation,
+    )
+    .await;
+
+    delegate_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &accounts.alice_stake.pubkey(),
+        &accounts.alice,
+        &accounts.vote_account.pubkey(),
+    )
+    .await;
+
+    if !pool_first {
+        advance_epoch(&mut context).await;
+        accounts.initialize(&mut context).await;
+    }
+
+    let instructions = instruction::deposit(
+        &id(),
+        &accounts.vote_account.pubkey(),
+        &accounts.alice_stake.pubkey(),
+        &accounts.alice_token,
+        &accounts.alice.pubkey(),
+        &accounts.alice.pubkey(),
+    );
+    let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
+    let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
+
+    let e = context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap_err();
+    check_error(e, SinglePoolError::WrongStakeState);
 }
 
 // TODO deposit with extra lamports mints them

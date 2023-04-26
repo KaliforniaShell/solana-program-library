@@ -5,9 +5,10 @@ mod helpers;
 
 use {
     helpers::*,
-    solana_program::{program_pack::Pack, stake},
     solana_program_test::*,
-    solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
+    solana_sdk::{
+        message::Message, program_pack::Pack, signature::Signer, stake, transaction::Transaction,
+    },
     spl_single_validator_pool::{id, instruction},
     spl_token::state::Mint,
 };
