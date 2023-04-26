@@ -18,20 +18,56 @@ use {
     test_case::test_case,
 };
 
-#[test_case(true, 0; "activated")]
-#[test_case(false, 0; "activating")]
-#[test_case(true, 100_000; "activated_extra")]
-#[test_case(false, 100_000; "activating_extra")]
+#[test_case(true, 0, false; "activated")]
+#[test_case(false, 0, false; "activating")]
+#[test_case(true, 100_000, false; "activated_extra")]
+#[test_case(false, 100_000, false; "activating_extra")]
+#[test_case(true, 0, true; "activated_second")]
+#[test_case(false, 0, true; "activating_second")]
 #[tokio::test]
-async fn success(activate: bool, extra_lamports: u64) {
+async fn success(activate: bool, extra_lamports: u64, prior_deposit: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
+    let minimum_delegation = get_minimum_delegation(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+    )
+    .await;
+
     accounts
-        .initialize_for_deposit(&mut context, TEST_STAKE_AMOUNT, None)
+        .initialize_for_deposit(
+            &mut context,
+            TEST_STAKE_AMOUNT,
+            if prior_deposit {
+                Some(minimum_delegation * 10)
+            } else {
+                None
+            },
+        )
         .await;
 
     if activate {
         advance_epoch(&mut context).await;
+    }
+
+    if prior_deposit {
+        let instructions = instruction::deposit(
+            &id(),
+            &accounts.vote_account.pubkey(),
+            &accounts.bob_stake.pubkey(),
+            &accounts.bob_token,
+            &accounts.bob.pubkey(),
+            &accounts.bob.pubkey(),
+        );
+        let message = Message::new(&instructions, Some(&accounts.bob.pubkey()));
+        let transaction = Transaction::new(&[&accounts.bob], message, context.last_blockhash);
+
+        context
+            .banks_client
+            .process_transaction(transaction)
+            .await
+            .unwrap();
     }
 
     let wallet_lamports_after_stake =

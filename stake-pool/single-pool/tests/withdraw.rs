@@ -11,8 +11,8 @@ use {
     test_case::test_case,
 };
 
-#[test_case(true; "success-activated")]
-#[test_case(false; "success-activating")]
+#[test_case(true; "activated")]
+#[test_case(false; "activating")]
 #[tokio::test]
 async fn success(activate: bool) {
     let mut context = program_test().start_with_context().await;
