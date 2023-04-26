@@ -18,10 +18,12 @@ use {
     test_case::test_case,
 };
 
-#[test_case(true; "activated")]
-#[test_case(false; "activating")]
+#[test_case(true, 0; "activated")]
+#[test_case(false, 0; "activating")]
+#[test_case(true, 100_000; "activated_extra")]
+#[test_case(false, 100_000; "activating_extra")]
 #[tokio::test]
-async fn success(activate: bool) {
+async fn success(activate: bool, extra_lamports: u64) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
     accounts
@@ -44,6 +46,17 @@ async fn success(activate: bool) {
     let (_, pool_stake_before, pool_lamports_before) =
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
     let pool_stake_before = pool_stake_before.unwrap().delegation.stake;
+
+    if extra_lamports > 0 {
+        transfer(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+            &accounts.stake_account,
+            extra_lamports,
+        )
+        .await;
+    }
 
     let mut fees = USER_STARTING_LAMPORTS - wallet_lamports_after_stake - stake_lamports;
 
@@ -94,16 +107,17 @@ async fn success(activate: bool) {
     assert_eq!(pool_stake_before + expected_deposit, pool_stake_after);
 
     // pool only gained stake
-    assert_eq!(pool_lamports_after, pool_lamports_before + expected_deposit,);
+    assert_eq!(pool_lamports_after, pool_lamports_before + expected_deposit);
     assert_eq!(
         pool_lamports_after,
-        pool_stake_before + expected_deposit + pool_meta_after.rent_exempt_reserve
+        pool_stake_before + expected_deposit + pool_meta_after.rent_exempt_reserve,
     );
 
     // alice got her rent back if active, or only paid fees otherwise
+    // and if someone sent lamports to the stake account, the next depositor gets them
     assert_eq!(
         wallet_lamports_after_deposit,
-        USER_STARTING_LAMPORTS - expected_deposit - fees
+        USER_STARTING_LAMPORTS - expected_deposit - fees + extra_lamports,
     );
 
     // alice got tokens. no rewards have been paid so tokens correspond to stake 1:1
@@ -133,7 +147,6 @@ async fn success_with_seed(activate: bool) {
         minimum_stake,
     );
     let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
-    println!("HANA make seed txn");
     let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
 
     context
@@ -167,7 +180,6 @@ async fn success_with_seed(activate: bool) {
     );
     let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
     fees += get_fee_for_message(&mut context.banks_client, &message).await;
-    println!("HANA deposit txn");
     let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
 
     context
@@ -320,9 +332,6 @@ async fn fail_activation_mismatch(pool_first: bool) {
         .unwrap_err();
     check_error(e, SinglePoolError::WrongStakeState);
 }
-
-// TODO deposit with extra lamports mints them
-// cannot deposit activated into activating, cannot deposit activating into activated
 
 // XXX TODO ok next i want to...
 // * negative cases listed above and in withdraw
