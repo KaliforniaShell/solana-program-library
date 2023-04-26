@@ -6,12 +6,8 @@ mod helpers;
 use {
     helpers::*,
     solana_program_test::*,
-    solana_sdk::{
-        message::Message, signature::Signer,
-        pubkey::Pubkey,
-        transaction::Transaction,
-    },
-    spl_single_validator_pool::{id, instruction, find_default_deposit_account_address},
+    solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
+    spl_single_validator_pool::{find_default_deposit_account_address, id, instruction},
     test_case::test_case,
 };
 
@@ -42,8 +38,7 @@ async fn success(activate: bool) {
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
     let pool_stake_before = pool_stake_before.unwrap().delegation.stake;
 
-    let mut fees =
-        USER_STARTING_LAMPORTS - wallet_lamports_after_stake - stake_lamports;
+    let mut fees = USER_STARTING_LAMPORTS - wallet_lamports_after_stake - stake_lamports;
 
     let instructions = instruction::deposit(
         &id(),
@@ -117,17 +112,18 @@ async fn success(activate: bool) {
 async fn success_with_seed(activate: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
+    let rent = context.banks_client.get_rent().await.unwrap();
     let minimum_stake = accounts.initialize(&mut context).await;
-    let alice_default_stake = find_default_deposit_account_address(&accounts.vote_account.pubkey(), &accounts.alice.pubkey());
-
-    println!("HANA base: {}, default: {}, calc: {}", accounts.alice.pubkey(), alice_default_stake, 
-    Pubkey::create_with_seed(&accounts.alice.pubkey(), "single-pool-user-stake", &accounts.alice.pubkey()).unwrap() // FIXME
+    let alice_default_stake = find_default_deposit_account_address(
+        &accounts.vote_account.pubkey(),
+        &accounts.alice.pubkey(),
     );
 
     let instructions = instruction::create_and_delegate_user_stake(
         &accounts.vote_account.pubkey(),
         &accounts.alice.pubkey(),
-        USER_STARTING_LAMPORTS,
+        &rent,
+        minimum_stake,
     );
     let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
     println!("HANA make seed txn");
@@ -152,8 +148,7 @@ async fn success_with_seed(activate: bool) {
         get_stake_account(&mut context.banks_client, &alice_default_stake).await;
     let alice_stake_before_deposit = alice_stake_before_deposit.unwrap().delegation.stake;
 
-    let mut fees =
-        USER_STARTING_LAMPORTS - wallet_lamports_after_stake - stake_lamports;
+    let mut fees = USER_STARTING_LAMPORTS - wallet_lamports_after_stake - stake_lamports;
 
     let instructions = instruction::deposit(
         &id(),
@@ -179,7 +174,7 @@ async fn success_with_seed(activate: bool) {
             .await
             .lamports;
 
-    let (pool_meta_after, pool_stake_after, pool_lamports_after) =
+    let (_, pool_stake_after, _) =
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
     let pool_stake_after = pool_stake_after.unwrap().delegation.stake;
 
@@ -242,10 +237,9 @@ async fn fail_autodeposit(activate: bool) {
         .unwrap_err();
 }
 
-// TODO deposit via seed, deposit with extra lamports mints them
+// TODO deposit with extra lamports mints them
 // cannot deposit activated into activating, cannot deposit activating into activated
 
 // XXX TODO ok next i want to...
-// * test create_and_delegate_user_stake
 // * negative cases listed above and in withdraw
 // * test the token math stochastically

@@ -9,7 +9,6 @@ use {
         account::Account as SolanaAccount,
         feature_set::stake_allow_zero_undelegated_amount,
         message::Message,
-        native_token::LAMPORTS_PER_SOL,
         signature::{Keypair, Signer},
         stake::state::{Authorized, Lockup},
         transaction::Transaction,
@@ -32,7 +31,7 @@ pub mod stake;
 pub use stake::*;
 
 pub const FIRST_NORMAL_EPOCH: u64 = 15;
-pub const USER_STARTING_LAMPORTS: u64 = 100_000_000_000_000; // 10k sol
+pub const USER_STARTING_LAMPORTS: u64 = 10_000_000_000_000; // 10k sol
 
 pub fn program_test() -> ProgramTest {
     let mut program_test = ProgramTest::default();
