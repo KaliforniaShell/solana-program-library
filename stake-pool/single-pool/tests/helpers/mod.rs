@@ -20,8 +20,8 @@ use {
     },
     spl_associated_token_account as atoken,
     spl_single_validator_pool::{
-        error::SinglePoolError, find_pool_authority_address, find_pool_mint_address,
-        find_pool_stake_address, id, instruction, processor::Processor,
+        find_pool_authority_address, find_pool_mint_address, find_pool_stake_address, id,
+        instruction, processor::Processor,
     },
 };
 
@@ -319,18 +319,30 @@ pub async fn transfer(
     banks_client.process_transaction(transaction).await.unwrap();
 }
 
-pub fn check_error(got: BanksClientError, expected: SinglePoolError) {
+pub fn check_error<T: Clone + std::fmt::Debug>(got: BanksClientError, expected: T)
+where
+    ProgramError: TryFrom<T>,
+{
     // banks error -> transaction error -> instruction error -> program error
-    // XXX if theres a less stupid way feel free to tell me lol
-    let got_p = if let TransactionError::InstructionError(_, e) = got.unwrap() {
-        ProgramError::try_from(e).unwrap()
+    let got_p: ProgramError = if let TransactionError::InstructionError(_, e) = got.unwrap() {
+        e.try_into().unwrap()
     } else {
         panic!(
             "couldnt convert {:?} to ProgramError (expected {:?})",
             got, expected
         );
     };
-    let expected_p = expected.clone().into();
+
+    // this silly thing is because we can guarantee From<T> has a Debug for T
+    // but TryFrom<T> produces Result<T, E> and E may not have Debug. so we cant call unwrap
+    // also we use TryFrom because we have to go `instruction error-> program error`
+    // because StakeError impls the former but not the latter...
+    // and that conversion is merely surjective........
+    // infomercial lady: "if only there were a better way!"
+    let expected_p = match expected.clone().try_into() {
+        Ok(v) => v,
+        Err(_) => panic!("could not unwrap {:?}", expected),
+    };
 
     if got_p != expected_p {
         panic!(

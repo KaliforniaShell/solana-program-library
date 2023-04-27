@@ -7,9 +7,13 @@ use {
     helpers::*,
     solana_program_test::*,
     solana_sdk::{
+        instruction::InstructionError,
         message::Message,
         signature::Signer,
-        stake::state::{Authorized, Lockup},
+        stake::{
+            instruction::StakeError,
+            state::{Authorized, Lockup},
+        },
         transaction::Transaction,
     },
     spl_single_validator_pool::{
@@ -28,19 +32,12 @@ use {
 async fn success(activate: bool, extra_lamports: u64, prior_deposit: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    let minimum_delegation = get_minimum_delegation(
-        &mut context.banks_client,
-        &context.payer,
-        &context.last_blockhash,
-    )
-    .await;
-
     accounts
         .initialize_for_deposit(
             &mut context,
             TEST_STAKE_AMOUNT,
             if prior_deposit {
-                Some(minimum_delegation * 10)
+                Some(TEST_STAKE_AMOUNT * 10)
             } else {
                 None
             },
@@ -263,18 +260,26 @@ async fn success_with_seed(activate: bool) {
     );
 }
 
-#[test_case(true; "activated")]
-#[test_case(false; "activating")]
+#[test_case(true, true; "activated_automorph")]
+#[test_case(false, true; "activating_automorph")]
+#[test_case(true, false; "activated_unauth")]
+#[test_case(false, false; "activating_unauth")]
 #[tokio::test]
-async fn fail_autodeposit(activate: bool) {
+async fn fail_bad_account(activate: bool, automorph: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
-    accounts.initialize(&mut context).await;
+    accounts
+        .initialize_for_deposit(&mut context, TEST_STAKE_AMOUNT, None)
+        .await;
 
     let instruction = instruction::deposit_stake(
         &id(),
         &accounts.vote_account.pubkey(),
-        &accounts.stake_account,
+        &if automorph {
+            accounts.stake_account
+        } else {
+            accounts.alice_stake.pubkey()
+        },
         &accounts.alice_token,
         &accounts.alice.pubkey(),
     );
@@ -290,7 +295,12 @@ async fn fail_autodeposit(activate: bool) {
         .process_transaction(transaction)
         .await
         .unwrap_err();
-    check_error(e, SinglePoolError::InvalidPoolAccountUsage);
+
+    if automorph {
+        check_error(e, SinglePoolError::InvalidPoolAccountUsage);
+    } else {
+        check_error::<InstructionError>(e, StakeError::MergeMismatch.into());
+    }
 }
 
 #[test_case(true; "pool_active")]
@@ -370,5 +380,8 @@ async fn fail_activation_mismatch(pool_first: bool) {
 }
 
 // XXX TODO ok next i want to...
-// * negative cases listed above and in withdraw
+// * negative cases in withdraw
 // * test the token math stochastically
+// * fail if pool uninitialized
+
+// XXX for both deposit and withdraw, fail fake: token program, stake program, mint, pool account... (clock, history?)
