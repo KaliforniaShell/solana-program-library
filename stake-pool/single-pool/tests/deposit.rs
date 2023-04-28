@@ -383,5 +383,3 @@ async fn fail_activation_mismatch(pool_first: bool) {
 // * negative cases in withdraw
 // * test the token math stochastically
 // * fail if pool uninitialized
-
-// XXX for both deposit and withdraw, fail fake: token program, stake program, mint, pool account... (clock, history?)

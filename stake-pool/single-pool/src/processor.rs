@@ -1029,3 +1029,80 @@ impl Processor {
         }
     }
 }
+
+// XXX ok i want to test my deposit/withdrawal amount functions
+// maybe unit test them. that means... well, think about deposit only, for simplicity
+//
+// deposit takes three arguments:
+// * T: premoney token supply
+// * P: premoney pool stake
+// * U: user deposit stake
+// and it outputs A, an amount of tokens to mint
+//
+// now, the input values can fluctuate based on...
+// * deposit: T and P both increase, T:P ratio constant, A:P ratio constant
+// * withdraw: T and P both decrease, ratios same
+// * rewards: P increases, T:P ratio improves, A:P ratio... improves?
+//   hm like. i deposit 100. 10 rewards accrue. i withdraw 100 tokens and get 110 stake. ok sure
+//
+// so that means invariants we care about are...
+// * deposits and withdrawls do not affect A:P
+// * rewards improve A:P proportional to user stake fraction
+//
+// so i think my gameplan here is... we need a fake pool struct
+// it contains token supply, pool stake amount, and all user stakes
+// then it can have functions: deposit, withdraw, reward, which just modify those numbers...
+// and then use proptest or my own thing to make random permutations and check the invariants hold?
+#[cfg(test)]
+#[allow(dead_code)] // XXX remove after
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[derive(Clone, Debug, Default)]
+    struct PoolState {
+        pub token_supply: u64,
+        pub total_stake: u64,
+        pub user_token_balances: BTreeMap<Pubkey, u64>,
+    }
+    impl PoolState {
+        // deposits a given amount of stake and returns the equivalent tokens on success
+        // note this is written as unsugared do-notation, so *any* failure returns None
+        #[rustfmt::skip]
+        pub fn deposit(&mut self, user_pubkey: &Pubkey, stake_to_deposit: u64) -> Option<u64> {
+            calculate_deposit_amount(self.token_supply, self.total_stake, stake_to_deposit)
+                .and_then(|tokens_to_mint| self.token_supply.checked_add(tokens_to_mint)
+                .and_then(|new_token_supply| self.total_stake.checked_add(stake_to_deposit)
+                .and_then(|new_total_stake| self.user_token_balances.remove(user_pubkey).or(Some(0))
+                .and_then(|old_user_token_balance| old_user_token_balance.checked_add(tokens_to_mint)
+                .map(|new_user_token_balance| {
+                    self.token_supply = new_token_supply;
+                    self.total_stake = new_total_stake;
+                    let _ = self.user_token_balances.insert(*user_pubkey, new_user_token_balance);
+                    tokens_to_mint
+            })))))
+        }
+
+        // burns a given amount of tokens and returns the equivalent stake on success
+        // note this is written as unsugared do-notation, so *any* failure returns None
+        #[rustfmt::skip]
+        pub fn withdraw(&mut self, user_pubkey: &Pubkey, tokens_to_burn: u64) -> Option<u64> {
+            calculate_withdraw_amount(self.token_supply, self.total_stake, tokens_to_burn)
+                .and_then(|stake_to_withdraw| self.token_supply.checked_sub(tokens_to_burn)
+                .and_then(|new_token_supply| self.total_stake.checked_sub(stake_to_withdraw)
+                .and_then(|new_total_stake| self.user_token_balances.remove(user_pubkey)
+                .and_then(|old_user_token_balance| old_user_token_balance.checked_sub(tokens_to_burn)
+                .map(|new_user_token_balance| {
+                    self.token_supply = new_token_supply;
+                    self.total_stake = new_total_stake;
+                    let _ = self.user_token_balances.insert(*user_pubkey, new_user_token_balance);
+                    stake_to_withdraw
+            })))))
+        }
+
+        // adds an arbitrary amount of stake as if inflations rewards were granted
+        pub fn reward(&mut self, reward_amount: u64) {
+            self.token_supply = self.token_supply.checked_add(reward_amount).unwrap();
+        }
+    }
+}
