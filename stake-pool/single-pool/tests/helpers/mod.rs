@@ -63,6 +63,78 @@ pub struct SinglePoolAccounts {
     pub token_program_id: Pubkey,
 }
 impl SinglePoolAccounts {
+    // does everything in initialize_for_deposit plus performs the deposit(s) and creates blank account(s)
+    // optionally advances to activation before the deposit
+    pub async fn initialize_for_withdraw(
+        &self,
+        context: &mut ProgramTestContext,
+        alice_amount: u64,
+        maybe_bob_amount: Option<u64>,
+        activate: bool,
+    ) -> u64 {
+        let minimum_delegation = self
+            .initialize_for_deposit(context, alice_amount, maybe_bob_amount)
+            .await;
+
+        if activate {
+            advance_epoch(context).await;
+        }
+
+        let instructions = instruction::deposit(
+            &id(),
+            &self.vote_account.pubkey(),
+            &self.alice_stake.pubkey(),
+            &self.alice_token,
+            &self.alice.pubkey(),
+            &self.alice.pubkey(),
+        );
+        let message = Message::new(&instructions, Some(&self.alice.pubkey()));
+        let transaction = Transaction::new(&[&self.alice], message, context.last_blockhash);
+
+        context
+            .banks_client
+            .process_transaction(transaction)
+            .await
+            .unwrap();
+
+        create_blank_stake_account(
+            &mut context.banks_client,
+            &self.alice,
+            &context.last_blockhash,
+            &self.alice_stake,
+        )
+        .await;
+
+        if maybe_bob_amount.is_some() {
+            let instructions = instruction::deposit(
+                &id(),
+                &self.vote_account.pubkey(),
+                &self.bob_stake.pubkey(),
+                &self.bob_token,
+                &self.bob.pubkey(),
+                &self.bob.pubkey(),
+            );
+            let message = Message::new(&instructions, Some(&self.bob.pubkey()));
+            let transaction = Transaction::new(&[&self.bob], message, context.last_blockhash);
+
+            context
+                .banks_client
+                .process_transaction(transaction)
+                .await
+                .unwrap();
+
+            create_blank_stake_account(
+                &mut context.banks_client,
+                &self.bob,
+                &context.last_blockhash,
+                &self.bob_stake,
+            )
+            .await;
+        }
+
+        minimum_delegation
+    }
+
     // does everything in initialize plus creates/delegates one or both stake accounts for our users
     // note this does not advance time, so everything is in an activating state
     pub async fn initialize_for_deposit(

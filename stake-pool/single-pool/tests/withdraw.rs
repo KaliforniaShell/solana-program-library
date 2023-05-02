@@ -18,41 +18,11 @@ async fn success(activate: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
     let minimum_delegation = accounts
-        .initialize_for_deposit(&mut context, TEST_STAKE_AMOUNT, None)
+        .initialize_for_withdraw(&mut context, TEST_STAKE_AMOUNT, None, activate)
         .await;
-
-    if activate {
-        advance_epoch(&mut context).await;
-    }
-
-    let instructions = instruction::deposit(
-        &id(),
-        &accounts.vote_account.pubkey(),
-        &accounts.alice_stake.pubkey(),
-        &accounts.alice_token,
-        &accounts.alice.pubkey(),
-        &accounts.alice.pubkey(),
-    );
-    let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
-    let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
-
-    context
-        .banks_client
-        .process_transaction(transaction)
-        .await
-        .unwrap();
 
     let (_, _, pool_lamports_before) =
         get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
-
-    // it doesnt matter if we reuse the address or not
-    create_blank_stake_account(
-        &mut context.banks_client,
-        &accounts.alice,
-        &context.last_blockhash,
-        &accounts.alice_stake,
-    )
-    .await;
 
     let wallet_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
         .await
