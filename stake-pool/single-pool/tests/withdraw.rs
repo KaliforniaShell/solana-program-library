@@ -11,14 +11,27 @@ use {
     test_case::test_case,
 };
 
-#[test_case(true; "activated")]
-#[test_case(false; "activating")]
+#[test_case(true, 0, false; "activated")]
+#[test_case(false, 0, false; "activating")]
+#[test_case(true, 100_000, false; "activated_extra")]
+#[test_case(false, 100_000, false; "activating_extra")]
+#[test_case(true, 0, true; "activated_second")]
+#[test_case(false, 0, true; "activating_second")]
 #[tokio::test]
-async fn success(activate: bool) {
+async fn success(activate: bool, extra_lamports: u64, prior_deposit: bool) {
     let mut context = program_test().start_with_context().await;
     let accounts = SinglePoolAccounts::default();
     let minimum_delegation = accounts
-        .initialize_for_withdraw(&mut context, TEST_STAKE_AMOUNT, None, activate)
+        .initialize_for_withdraw(
+            &mut context,
+            TEST_STAKE_AMOUNT,
+            if prior_deposit {
+                Some(TEST_STAKE_AMOUNT * 10)
+            } else {
+                None
+            },
+            activate,
+        )
         .await;
 
     let (_, _, pool_lamports_before) =
@@ -27,6 +40,17 @@ async fn success(activate: bool) {
     let wallet_lamports_before = get_account(&mut context.banks_client, &accounts.alice.pubkey())
         .await
         .lamports;
+
+    if extra_lamports > 0 {
+        transfer(
+            &mut context.banks_client,
+            &context.payer,
+            &context.last_blockhash,
+            &accounts.stake_account,
+            extra_lamports,
+        )
+        .await;
+    }
 
     let instructions = instruction::withdraw(
         &id(),
@@ -66,6 +90,16 @@ async fn success(activate: bool) {
         get_stake_account_rent(&mut context.banks_client).await + TEST_STAKE_AMOUNT
     };
 
+    let prior_deposits = if prior_deposit {
+        if activate {
+            TEST_STAKE_AMOUNT * 10
+        } else {
+            TEST_STAKE_AMOUNT * 10 + get_stake_account_rent(&mut context.banks_client).await
+        }
+    } else {
+        0
+    };
+
     // alice received her stake back
     assert_eq!(alice_stake_after, expected_deposit);
 
@@ -74,10 +108,13 @@ async fn success(activate: bool) {
     assert_eq!(wallet_lamports_after, wallet_lamports_before - fees);
 
     // pool retains minstake
-    assert_eq!(pool_stake_after, minimum_delegation);
+    assert_eq!(pool_stake_after, prior_deposits + minimum_delegation);
 
-    // pool lamports otherwise unchanged
-    assert_eq!(pool_lamports_after, pool_lamports_before - expected_deposit,);
+    // pool lamports otherwise unchanged. unexpected transfers affect nothing
+    assert_eq!(
+        pool_lamports_after,
+        pool_lamports_before - expected_deposit + extra_lamports
+    );
 
     // alice has no tokens
     assert_eq!(
@@ -88,9 +125,8 @@ async fn success(activate: bool) {
     // tokens were burned
     assert_eq!(
         get_token_supply(&mut context.banks_client, &accounts.mint).await,
-        0,
+        prior_deposits,
     );
 }
 
-// TODO withdraw after rewards, withdraw after another deposit, fail withdraw from pool account
-// fail with fake mint, fail with fake token value, fail fake token program, fail fake stake program
+// TODO withdraw after rewards, fail withdraw from pool account
