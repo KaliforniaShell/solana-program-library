@@ -4,7 +4,6 @@ use {
     solana_program_test::*,
     solana_sdk::{
         account::Account as SolanaAccount,
-        feature_set::stake_allow_zero_undelegated_amount,
         hash::Hash,
         message::Message,
         program_error::ProgramError,
@@ -43,7 +42,6 @@ pub fn program_test() -> ProgramTest {
         id(),
         processor!(Processor::process),
     );
-    program_test.deactivate_feature(stake_allow_zero_undelegated_amount::id());
 
     program_test.prefer_bpf(false);
     program_test

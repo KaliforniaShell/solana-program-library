@@ -25,10 +25,6 @@ async fn success(activate: bool) {
         advance_epoch(&mut context).await;
     }
 
-    let (_, alice_stake_before_deposit, stake_lamports) =
-        get_stake_account(&mut context.banks_client, &accounts.alice_stake.pubkey()).await;
-    let alice_stake_before_deposit = alice_stake_before_deposit.unwrap().delegation.stake;
-
     let instructions = instruction::deposit(
         &id(),
         &accounts.vote_account.pubkey(),
@@ -95,9 +91,9 @@ async fn success(activate: bool) {
 
     // when active, the depositor gets their rent back, but when activating, its just added to stake
     let expected_deposit = if activate {
-        alice_stake_before_deposit
+        TEST_STAKE_AMOUNT
     } else {
-        stake_lamports
+        get_stake_account_rent(&mut context.banks_client).await + TEST_STAKE_AMOUNT
     };
 
     // alice received her stake back

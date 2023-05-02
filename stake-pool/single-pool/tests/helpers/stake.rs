@@ -33,6 +33,11 @@ pub async fn get_stake_account(
     }
 }
 
+pub async fn get_stake_account_rent(banks_client: &mut BanksClient) -> u64 {
+    let rent = banks_client.get_rent().await.unwrap();
+    rent.minimum_balance(std::mem::size_of::<stake::state::StakeState>())
+}
+
 pub async fn get_minimum_delegation(
     banks_client: &mut BanksClient,
     payer: &Keypair,
@@ -66,10 +71,7 @@ pub async fn create_independent_stake_account(
     lockup: &stake::state::Lockup,
     stake_amount: u64,
 ) -> u64 {
-    let rent = banks_client.get_rent().await.unwrap();
-    let lamports =
-        rent.minimum_balance(std::mem::size_of::<stake::state::StakeState>()) + stake_amount;
-
+    let lamports = get_stake_account_rent(banks_client).await + stake_amount;
     let transaction = Transaction::new_signed_with_payer(
         &stake::instruction::create_account(
             &payer.pubkey(),
@@ -93,9 +95,7 @@ pub async fn create_blank_stake_account(
     recent_blockhash: &Hash,
     stake: &Keypair,
 ) -> u64 {
-    let rent = banks_client.get_rent().await.unwrap();
-    let lamports = rent.minimum_balance(std::mem::size_of::<stake::state::StakeState>()) + 1;
-
+    let lamports = get_stake_account_rent(banks_client).await;
     let transaction = Transaction::new_signed_with_payer(
         &[system_instruction::create_account(
             &payer.pubkey(),
