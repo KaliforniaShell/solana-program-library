@@ -7,7 +7,7 @@ use {
     helpers::*,
     solana_program_test::*,
     solana_sdk::{message::Message, signature::Signer, transaction::Transaction},
-    spl_single_validator_pool::{id, instruction},
+    spl_single_validator_pool::{error::SinglePoolError, id, instruction},
     test_case::test_case,
 };
 
@@ -129,4 +129,34 @@ async fn success(activate: bool, extra_lamports: u64, prior_deposit: bool) {
     );
 }
 
-// TODO withdraw after rewards, fail withdraw from pool account
+#[test_case(true; "activated")]
+#[test_case(false; "activating")]
+#[tokio::test]
+async fn fail_automorphic(activate: bool) {
+    let mut context = program_test().start_with_context().await;
+    let accounts = SinglePoolAccounts::default();
+    accounts
+        .initialize_for_withdraw(&mut context, TEST_STAKE_AMOUNT, None, activate)
+        .await;
+
+    let instructions = instruction::withdraw(
+        &id(),
+        &accounts.vote_account.pubkey(),
+        &accounts.stake_account,
+        &accounts.authority,
+        &accounts.alice_token,
+        &accounts.alice.pubkey(),
+        TEST_STAKE_AMOUNT,
+    );
+    let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
+    let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
+
+    let e = context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap_err();
+    check_error(e, SinglePoolError::InvalidPoolAccountUsage);
+}
+
+// TODO withdraw after rewards
