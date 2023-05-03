@@ -1056,8 +1056,17 @@ impl Processor {
 #[cfg(test)]
 #[allow(dead_code)] // XXX remove after
 mod tests {
-    use super::*;
-    use std::collections::BTreeMap;
+    use {
+        super::*,
+        approx::assert_relative_eq,
+        rand::{
+            distributions::{Distribution, Uniform},
+            Rng, SeedableRng,
+        },
+        solana_sdk::{signature::Signer, signer::keypair::Keypair},
+        std::collections::BTreeMap,
+        test_case::test_case,
+    };
 
     #[derive(Clone, Debug, Default)]
     struct PoolState {
@@ -1068,6 +1077,7 @@ mod tests {
     impl PoolState {
         // deposits a given amount of stake and returns the equivalent tokens on success
         // note this is written as unsugared do-notation, so *any* failure returns None
+        // otherwise returns the value produced by its respective calculate function
         #[rustfmt::skip]
         pub fn deposit(&mut self, user_pubkey: &Pubkey, stake_to_deposit: u64) -> Option<u64> {
             calculate_deposit_amount(self.token_supply, self.total_stake, stake_to_deposit)
@@ -1085,6 +1095,7 @@ mod tests {
 
         // burns a given amount of tokens and returns the equivalent stake on success
         // note this is written as unsugared do-notation, so *any* failure returns None
+        // otherwise returns the value produced by its respective calculate function
         #[rustfmt::skip]
         pub fn withdraw(&mut self, user_pubkey: &Pubkey, tokens_to_burn: u64) -> Option<u64> {
             calculate_withdraw_amount(self.token_supply, self.total_stake, tokens_to_burn)
@@ -1100,9 +1111,145 @@ mod tests {
             })))))
         }
 
-        // adds an arbitrary amount of stake as if inflations rewards were granted
+        // adds an arbitrary amount of stake, as if inflation rewards were granted
         pub fn reward(&mut self, reward_amount: u64) {
-            self.token_supply = self.token_supply.checked_add(reward_amount).unwrap();
+            self.total_stake = self.total_stake.checked_add(reward_amount).unwrap();
+        }
+
+        // get the token balance for a user
+        pub fn tokens(&self, user_pubkey: &Pubkey) -> u64 {
+            *self.user_token_balances.get(user_pubkey).unwrap_or(&0)
+        }
+
+        // get the amount of stake that belongs to a user
+        pub fn stake(&self, user_pubkey: &Pubkey) -> u64 {
+            let tokens = self.tokens(user_pubkey);
+            if tokens > 0 {
+                u64::try_from(tokens as u128 * self.total_stake as u128 / self.token_supply as u128)
+                    .unwrap()
+            } else {
+                0
+            }
+        }
+
+        // get the share of the pool that belongs to a user, as a float between 0 and 1
+        pub fn share(&self, user_pubkey: &Pubkey) -> f64 {
+            let tokens = self.tokens(user_pubkey);
+            if tokens > 0 {
+                tokens as f64 / self.token_supply as f64
+            } else {
+                0.0
+            }
+        }
+    }
+
+    // this deterministically tests basic behavior of calculate_deposit_amount and calculate_withdraw_amount
+    #[test]
+    fn simple_deposit_withdraw() {
+        let mut pool = PoolState::default();
+        let alice = Keypair::new().pubkey();
+        let bob = Keypair::new().pubkey();
+        let chad = Keypair::new().pubkey();
+
+        // first deposit. alice now has 250
+        pool.deposit(&alice, 250).unwrap();
+        assert_eq!(pool.tokens(&alice), 250);
+        assert_eq!(pool.token_supply, 250);
+        assert_eq!(pool.total_stake, 250);
+
+        // second deposit. bob now has 750
+        pool.deposit(&bob, 750).unwrap();
+        assert_eq!(pool.tokens(&bob), 750);
+        assert_eq!(pool.token_supply, 1000);
+        assert_eq!(pool.total_stake, 1000);
+
+        // alice controls 25% of the pool and bob controls 75%. rewards should accrue likewise
+        // use nice even numbers, we can test fiddly stuff in the stochastic cases
+        assert_relative_eq!(pool.share(&alice), 0.25);
+        assert_relative_eq!(pool.share(&bob), 0.75);
+        pool.reward(1000);
+        assert_eq!(pool.stake(&alice), pool.tokens(&alice) * 2);
+        assert_eq!(pool.stake(&bob), pool.tokens(&bob) * 2);
+        assert_relative_eq!(pool.share(&alice), 0.25);
+        assert_relative_eq!(pool.share(&bob), 0.75);
+
+        // alice harvests rewards, reducing her share of the *previous* pool size to 12.5%
+        // but because the pool itself has shrunk to 87.5%, its actually more like 14.3%
+        // luckily chad deposits immediately after to make our math easier
+        let stake_removed = pool.withdraw(&alice, 125).unwrap();
+        pool.deposit(&chad, 250).unwrap();
+        assert_eq!(stake_removed, 250);
+        assert_relative_eq!(pool.share(&alice), 0.125);
+        assert_relative_eq!(pool.share(&bob), 0.75);
+
+        // bob and chad exit the pool
+        let stake_removed = pool.withdraw(&bob, 750).unwrap();
+        assert_eq!(stake_removed, 1500);
+        assert_relative_eq!(pool.share(&bob), 0.0);
+        pool.withdraw(&chad, 125).unwrap();
+        assert_relative_eq!(pool.share(&alice), 1.0);
+    }
+
+    // this stochastically tests calculate_deposit_amount and calculate_withdraw_amount
+    // the objective is specifically to ensure that the math does not fail on any combination of state changes
+    #[test_case(rand::random(), false; "no_rewards")]
+    #[test_case(rand::random(), true; "with_rewards")]
+    fn random_deposit_withdraw(seed: u64, _rewards: bool) {
+        println!(
+            "TEST SEED: {}. edit the test case to pass this value if needed to debug failures",
+            seed
+        );
+        let mut prng = rand::rngs::StdRng::seed_from_u64(seed);
+
+        // run everything a number of times to get a good sample
+        // TODO 100? 1000?
+        for _ in 0..1 {
+            // PoolState tracks all outstanding tokens and the total combined stake
+            // there is no reasonable way to track "deposited stake" because reward accrual makes this concept incoherent
+            // a token corresponds to a percentage, not a stake value
+            let mut pool = PoolState::default();
+            let deposit_range = Uniform::from(LAMPORTS_PER_SOL..LAMPORTS_PER_SOL * 1000);
+
+            // generate between 1 and 100 users and have ~half of them deposit
+            // note for these tests we adhere to the minimum delegation
+            // one of the thing we want to test is deposit size being many ooms larger than reward size
+            let mut users = vec![];
+            let user_count: usize = prng.gen_range(1..=100);
+            for _ in 0..user_count {
+                let user = Keypair::new().pubkey();
+
+                if prng.gen_bool(0.5) {
+                    let amount = deposit_range.sample(&mut prng);
+                    pool.deposit(&user, amount).unwrap();
+                }
+
+                users.push(user);
+            }
+
+            println!("pool: {:#?}", pool);
+
+            // XXX ok what operations can take place here
+            // * deposit some random amount of stake
+            //   - stake increases by that much
+            //   - tokens increase proportional to... some amount
+            //   - pool share increases... some amount
+            // * burn some random amount of (held) tokens
+            //   - tokens decrease by that much
+            //   - stake decreases proportional to something
+            //   - pool share decreases by something
+            // * rewards
+            //   - all shares and tokens remain static
+            //   - all stakes increase
+
+            // TODO ok next um... i guess i need to figure out rules for pool size change
+            // eg... 1000 pool, deposit 100, person owns slightly less than 10% of it
+            // because they dont own 100 of 1000, they own 100 of 1100
+            // then i write my dep/wit/rew fns, which...
+            // pick a random user if needed, do the action with a random amount
+            // then check (their? all?) user(s) to see if calculations were correct
+            // the weird thing here is hm. how much am i testing the target fns vs the model lol
+            // i need like. the calculations to be externalized... such that im actually checking them
+            // and not just using them to "check" themselves. think on this
         }
     }
 }
