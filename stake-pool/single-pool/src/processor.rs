@@ -1054,6 +1054,7 @@ impl Processor {
 // then it can have functions: deposit, withdraw, reward, which just modify those numbers...
 // and then use proptest or my own thing to make random permutations and check the invariants hold?
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 #[allow(dead_code)] // XXX remove after
 mod tests {
     use {
