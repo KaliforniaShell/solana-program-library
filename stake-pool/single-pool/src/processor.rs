@@ -1209,7 +1209,7 @@ mod tests {
 
         // run everything a number of times to get a good sample
         // TODO 100? 1000?
-        for _ in 0..1 {
+        for _ in 0..100 {
             // PoolState tracks all outstanding tokens and the total combined stake
             // there is no reasonable way to track "deposited stake" because reward accrual makes this concept incoherent
             // a token corresponds to a percentage, not a stake value
@@ -1240,8 +1240,8 @@ mod tests {
 
             // now we do a set of arbitrary operations and confirm invariants hold
             // we overweight deposit a little bit to lessen the chances we random walk to an empty pool
-            let range = Uniform::from(0.0..1.0);
-            for _ in 0..10 {
+            let range = Uniform::from(if with_rewards { 0.0..1.0 } else { 0.0..0.7 });
+            for _ in 0..1000 {
                 match range.sample(&mut prng) {
                     // deposit a random amount of stake for tokens with a random user
                     // check their stake, tokens, and share increase by the expected amount
@@ -1253,11 +1253,39 @@ mod tests {
 
                     // run a single epoch worth of rewards
                     // check all user shares stay the same and stakes increase by the expected amount
-                    _ => {}
+                    _ => {
+                        let prev_shares = users
+                            .iter()
+                            .map(|user| (user, pool.share(&user)))
+                            .filter(|(_, share)| share > &0.0)
+                            .collect::<Vec<_>>();
+
+                        let prev_stakes = users
+                            .iter()
+                            .map(|user| (user, pool.stake(&user)))
+                            .filter(|(_, stake)| stake > &0)
+                            .collect::<Vec<_>>();
+
+                        pool.reward((pool.total_stake as f64 * INFLATION_BASE_RATE) as u64);
+
+                        // shares are the same before and after
+                        for (user, prev_share) in prev_shares {
+                            assert_eq!(pool.share(&user), prev_share);
+                        }
+
+                        // stake increase is within 2 lamps when calculated as a difference or a percentage
+                        for (user, prev_stake) in prev_stakes {
+                            let curr_stake = pool.stake(&user);
+                            let stake_share = prev_stake as f64 * INFLATION_BASE_RATE;
+                            let stake_diff = (curr_stake - prev_stake) as f64;
+
+                            assert!((stake_share - stake_diff).abs() <= 2.0);
+                        }
+                    }
                 }
             }
 
-            println!("pool: {:#?}", pool);
+            //println!("pool: {:#?}", pool);
 
             // XXX ok what operations can take place here
             // * deposit some random amount of stake
