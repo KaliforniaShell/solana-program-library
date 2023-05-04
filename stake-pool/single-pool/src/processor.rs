@@ -1254,31 +1254,23 @@ mod tests {
                     // run a single epoch worth of rewards
                     // check all user shares stay the same and stakes increase by the expected amount
                     _ => {
-                        let prev_shares = users
+                        let prev_shares_stakes = users
                             .iter()
-                            .map(|user| (user, pool.share(&user)))
-                            .filter(|(_, share)| share > &0.0)
-                            .collect::<Vec<_>>();
-
-                        let prev_stakes = users
-                            .iter()
-                            .map(|user| (user, pool.stake(&user)))
-                            .filter(|(_, stake)| stake > &0)
+                            .map(|user| (user, pool.share(&user), pool.stake(&user)))
+                            .filter(|(_, _, stake)| stake > &0)
                             .collect::<Vec<_>>();
 
                         pool.reward((pool.total_stake as f64 * INFLATION_BASE_RATE) as u64);
 
-                        // shares are the same before and after
-                        for (user, prev_share) in prev_shares {
+                        for (user, prev_share, prev_stake) in prev_shares_stakes {
+                            // shares are the same before and after
                             assert_eq!(pool.share(&user), prev_share);
-                        }
 
-                        // stake increase is within 2 lamps when calculated as a difference or a percentage
-                        for (user, prev_stake) in prev_stakes {
                             let curr_stake = pool.stake(&user);
                             let stake_share = prev_stake as f64 * INFLATION_BASE_RATE;
                             let stake_diff = (curr_stake - prev_stake) as f64;
 
+                            // stake increase is within 2 lamps when calculated as a difference or a percentage
                             assert!((stake_share - stake_diff).abs() <= 2.0);
                         }
                     }
