@@ -1069,6 +1069,9 @@ mod tests {
         test_case::test_case,
     };
 
+    // approximately 6%/yr assuking 146 epochs
+    const INFLATION_BASE_RATE: f64 = 0.0004;
+
     #[derive(Clone, Debug, Default)]
     struct PoolState {
         pub token_supply: u64,
@@ -1193,9 +1196,11 @@ mod tests {
 
     // this stochastically tests calculate_deposit_amount and calculate_withdraw_amount
     // the objective is specifically to ensure that the math does not fail on any combination of state changes
-    #[test_case(rand::random(), false; "no_rewards")]
-    #[test_case(rand::random(), true; "with_rewards")]
-    fn random_deposit_withdraw(seed: u64, _rewards: bool) {
+    // the no_minimum case is to account for a future where small deposits are possible through multistake
+    #[test_case(rand::random(), false, false; "no_rewards")]
+    #[test_case(rand::random(), true, false; "with_rewards")]
+    #[test_case(rand::random(), true, true; "no_minimum")]
+    fn random_deposit_withdraw(seed: u64, with_rewards: bool, no_minimum: bool) {
         println!(
             "TEST SEED: {}. edit the test case to pass this value if needed to debug failures",
             seed
@@ -1210,21 +1215,46 @@ mod tests {
             // a token corresponds to a percentage, not a stake value
             let mut pool = PoolState::default();
             let deposit_range = Uniform::from(LAMPORTS_PER_SOL..LAMPORTS_PER_SOL * 1000);
+            let minnow_range = Uniform::from(1..LAMPORTS_PER_SOL);
 
             // generate between 1 and 100 users and have ~half of them deposit
-            // note for these tests we adhere to the minimum delegation
-            // one of the thing we want to test is deposit size being many ooms larger than reward size
+            // note for most of these tests we adhere to the minimum delegation
+            // one of the thing we want to see is deposit size being many ooms larger than reward size
             let mut users = vec![];
             let user_count: usize = prng.gen_range(1..=100);
             for _ in 0..user_count {
                 let user = Keypair::new().pubkey();
 
                 if prng.gen_bool(0.5) {
-                    let amount = deposit_range.sample(&mut prng);
+                    let amount = if no_minimum && prng.gen_bool(0.2) {
+                        minnow_range.sample(&mut prng)
+                    } else {
+                        deposit_range.sample(&mut prng)
+                    };
+
                     pool.deposit(&user, amount).unwrap();
                 }
 
                 users.push(user);
+            }
+
+            // now we do a set of arbitrary operations and confirm invariants hold
+            // we overweight deposit a little bit to lessen the chances we random walk to an empty pool
+            let range = Uniform::from(0.0..1.0);
+            for _ in 0..10 {
+                match range.sample(&mut prng) {
+                    // deposit a random amount of stake for tokens with a random user
+                    // check their stake, tokens, and share increase by the expected amount
+                    n if n <= 0.4 => {}
+
+                    // burn a random amount of tokens from a random user with outstanding deposits
+                    // check their stake, tokens, and share decrease by the expected amount
+                    n if n > 0.4 && n <= 0.7 => {}
+
+                    // run a single epoch worth of rewards
+                    // check all user shares stay the same and stakes increase by the expected amount
+                    _ => {}
+                }
             }
 
             println!("pool: {:#?}", pool);
@@ -1251,6 +1281,50 @@ mod tests {
             // the weird thing here is hm. how much am i testing the target fns vs the model lol
             // i need like. the calculations to be externalized... such that im actually checking them
             // and not just using them to "check" themselves. think on this
+
+            // XXX ok so 100 is 10% of 1000
+            // but deposit 100 and it goes to 1100
+            // that means 100 / 1100 = 9.09%
+            // what should we be tracking externally? share? stake?
+            // mm. so rewards should be easy, right?
+            // we reward 100 stake. everyone's share stays the same
+            // but everyone's effective stake goes up by... the same percentage as the pool?
+            // cool. yea. reward cycle looks like
+            // * get all shares and stakes
+            // * do reward
+            // * get all again
+            // = shares all relatively equal
+            // = stakes increased by share times
         }
+    }
+
+    #[test]
+    fn example() {
+        let mut pool = PoolState::default();
+        let alice = Keypair::new().pubkey();
+        let bob = Keypair::new().pubkey();
+
+        pool.deposit(&alice, LAMPORTS_PER_SOL).unwrap();
+        pool.deposit(&bob, 3 * LAMPORTS_PER_SOL).unwrap();
+
+        let alice_pct_before = pool.share(&alice);
+        let bob_pct_before = pool.share(&bob);
+        let alice_stk_before = pool.stake(&alice);
+        let bob_stk_before = pool.stake(&bob);
+        pool.reward((pool.total_stake as f64 * INFLATION_BASE_RATE) as u64);
+        let alice_pct_after = pool.share(&alice);
+        let bob_pct_after = pool.share(&bob);
+        let alice_stk_after = pool.stake(&alice);
+        let bob_stk_after = pool.stake(&bob);
+
+        println!("{} -> {}", alice_pct_before, alice_pct_after);
+        println!("{} -> {}", bob_pct_before, bob_pct_after);
+        println!("{} -> {}", alice_stk_before, alice_stk_after);
+        println!("{} -> {}", bob_stk_before, bob_stk_after);
+        println!(
+            "? {}, {}",
+            alice_stk_after - alice_stk_before,
+            alice_stk_before as f64 * INFLATION_BASE_RATE
+        );
     }
 }
