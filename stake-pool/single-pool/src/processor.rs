@@ -1062,6 +1062,8 @@ mod tests {
         approx::assert_relative_eq,
         rand::{
             distributions::{Distribution, Uniform},
+            rngs::StdRng,
+            seq::{IteratorRandom, SliceRandom},
             Rng, SeedableRng,
         },
         solana_sdk::{signature::Signer, signer::keypair::Keypair},
@@ -1207,6 +1209,23 @@ mod tests {
         );
         let mut prng = rand::rngs::StdRng::seed_from_u64(seed);
 
+        // deposit_range is the range of typical deposits within minimum_delegation
+        // minnow_range is under the minimum for cases where we test that
+        // op_range is how we roll whether to deposit, withdraw, or reward
+        // std_range is a standard probability
+        let deposit_range = Uniform::from(LAMPORTS_PER_SOL..LAMPORTS_PER_SOL * 1000);
+        let minnow_range = Uniform::from(1..LAMPORTS_PER_SOL);
+        let op_range = Uniform::from(if with_rewards { 0.0..1.0 } else { 0.0..0.7 });
+        let std_range = Uniform::from(0.0..1.0);
+
+        let deposit_amount = |prng: &mut StdRng| {
+            if no_minimum && prng.gen_bool(0.2) {
+                minnow_range.sample(prng)
+            } else {
+                deposit_range.sample(prng)
+            }
+        };
+
         // run everything a number of times to get a good sample
         // TODO 100? 1000?
         for _ in 0..100 {
@@ -1214,8 +1233,6 @@ mod tests {
             // there is no reasonable way to track "deposited stake" because reward accrual makes this concept incoherent
             // a token corresponds to a percentage, not a stake value
             let mut pool = PoolState::default();
-            let deposit_range = Uniform::from(LAMPORTS_PER_SOL..LAMPORTS_PER_SOL * 1000);
-            let minnow_range = Uniform::from(1..LAMPORTS_PER_SOL);
 
             // generate between 1 and 100 users and have ~half of them deposit
             // note for most of these tests we adhere to the minimum delegation
@@ -1226,13 +1243,7 @@ mod tests {
                 let user = Keypair::new().pubkey();
 
                 if prng.gen_bool(0.5) {
-                    let amount = if no_minimum && prng.gen_bool(0.2) {
-                        minnow_range.sample(&mut prng)
-                    } else {
-                        deposit_range.sample(&mut prng)
-                    };
-
-                    pool.deposit(&user, amount).unwrap();
+                    pool.deposit(&user, deposit_amount(&mut prng)).unwrap();
                 }
 
                 users.push(user);
@@ -1240,20 +1251,54 @@ mod tests {
 
             // now we do a set of arbitrary operations and confirm invariants hold
             // we overweight deposit a little bit to lessen the chances we random walk to an empty pool
-            let range = Uniform::from(if with_rewards { 0.0..1.0 } else { 0.0..0.7 });
             for _ in 0..1000 {
-                match range.sample(&mut prng) {
+                match op_range.sample(&mut prng) {
                     // deposit a random amount of stake for tokens with a random user
                     // check their stake, tokens, and share increase by the expected amount
-                    n if n <= 0.4 => {}
+                    n if n <= 0.4 => {
+                        let user = users.choose(&mut prng).unwrap();
+                        let prev_tokens = pool.tokens(&user);
+                        let prev_share = pool.share(&user);
+                        let prev_stake = pool.stake(&user);
+                        let prev_token_supply = pool.token_supply;
+                        let prev_total_stake = pool.total_stake;
+
+                        let stake_deposited = deposit_amount(&mut prng);
+                        let tokens_minted = pool.deposit(&user, stake_deposited).unwrap();
+
+                        // TODO check invariants
+                    }
 
                     // burn a random amount of tokens from a random user with outstanding deposits
                     // check their stake, tokens, and share decrease by the expected amount
-                    n if n > 0.4 && n <= 0.7 => {}
+                    n if n > 0.4 && n <= 0.7 => {
+                        if let Some(user) = users
+                            .iter()
+                            .filter(|user| pool.tokens(&user) > 0)
+                            .choose(&mut prng)
+                        {
+                            let prev_tokens = pool.tokens(&user);
+                            let prev_share = pool.share(&user);
+                            let prev_stake = pool.stake(&user);
+                            let prev_token_supply = pool.token_supply;
+                            let prev_total_stake = pool.total_stake;
+
+                            let tokens_burned = if std_range.sample(&mut prng) <= 0.1 {
+                                prev_tokens
+                            } else {
+                                prng.gen_range(0..prev_tokens)
+                            };
+                            let stake_received = pool.withdraw(&user, tokens_burned).unwrap();
+                        };
+
+                        // TODO check invariants
+                    }
 
                     // run a single epoch worth of rewards
                     // check all user shares stay the same and stakes increase by the expected amount
                     _ => {
+                        assert!(with_rewards);
+
                         let prev_shares_stakes = users
                             .iter()
                             .map(|user| (user, pool.share(&user), pool.stake(&user)))
