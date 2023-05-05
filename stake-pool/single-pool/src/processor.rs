@@ -1215,7 +1215,7 @@ mod tests {
         // std_range is a standard probability
         let deposit_range = Uniform::from(LAMPORTS_PER_SOL..LAMPORTS_PER_SOL * 1000);
         let minnow_range = Uniform::from(1..LAMPORTS_PER_SOL);
-        let op_range = Uniform::from(if with_rewards { 0.0..1.0 } else { 0.0..0.7 });
+        let op_range = Uniform::from(if with_rewards { 0.0..1.0 } else { 0.0..0.65 });
         let std_range = Uniform::from(0.0..1.0);
 
         let deposit_amount = |prng: &mut StdRng| {
@@ -1250,12 +1250,12 @@ mod tests {
             }
 
             // now we do a set of arbitrary operations and confirm invariants hold
-            // we overweight deposit a little bit to lessen the chances we random walk to an empty pool
+            // we underweight withdraw a little bit to lessen the chances we random walk to an empty pool
             for _ in 0..1000 {
                 match op_range.sample(&mut prng) {
                     // deposit a random amount of stake for tokens with a random user
                     // check their stake, tokens, and share increase by the expected amount
-                    n if n <= 0.4 => {
+                    n if n <= 0.35 => {
                         let user = users.choose(&mut prng).unwrap();
                         let prev_tokens = pool.tokens(&user);
                         let prev_share = pool.share(&user);
@@ -1266,12 +1266,35 @@ mod tests {
                         let stake_deposited = deposit_amount(&mut prng);
                         let tokens_minted = pool.deposit(&user, stake_deposited).unwrap();
 
-                        // TODO check invariants
+                        // stake increased by exactly the deposit amount
+                        assert_eq!(pool.total_stake - prev_total_stake, stake_deposited);
+
+                        // calculated stake fraction is within 2 lamps of deposit amount
+                        assert!(
+                            (pool.stake(&user) as i64 - prev_stake as i64 - stake_deposited as i64)
+                                .abs()
+                                <= 2
+                        );
+
+                        // tokens increased by exactly the mint amount
+                        assert_eq!(pool.token_supply - prev_token_supply, tokens_minted);
+
+                        // tokens per supply increases with stake per total
+                        if prev_total_stake > 0 {
+                            assert_eq!(
+                                format!("{:.6}", pool.share(&user) - prev_share),
+                                format!(
+                                    "{:.6}",
+                                    pool.stake(&user) as f64 / pool.total_stake as f64
+                                        - prev_stake as f64 / prev_total_stake as f64
+                                )
+                            );
+                        }
                     }
 
                     // burn a random amount of tokens from a random user with outstanding deposits
                     // check their stake, tokens, and share decrease by the expected amount
-                    n if n > 0.4 && n <= 0.7 => {
+                    n if n > 0.35 && n <= 0.65 => {
                         if let Some(user) = users
                             .iter()
                             .filter(|user| pool.tokens(&user) > 0)
@@ -1289,9 +1312,10 @@ mod tests {
                                 prng.gen_range(0..prev_tokens)
                             };
                             let stake_received = pool.withdraw(&user, tokens_burned).unwrap();
-                        };
 
-                        // TODO check invariants
+                            // tokens decreased by the burn amount
+                            assert_eq!(prev_token_supply - pool.token_supply, tokens_burned);
+                        };
                     }
 
                     // run a single epoch worth of rewards
