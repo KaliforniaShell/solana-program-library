@@ -1227,7 +1227,6 @@ mod tests {
         };
 
         // run everything a number of times to get a good sample
-        // TODO 100? 1000?
         for _ in 0..100 {
             // PoolState tracks all outstanding tokens and the total combined stake
             // there is no reasonable way to track "deposited stake" because reward accrual makes this concept incoherent
@@ -1257,7 +1256,6 @@ mod tests {
                     // check their stake, tokens, and share increase by the expected amount
                     n if n <= 0.35 => {
                         let user = users.choose(&mut prng).unwrap();
-                        let prev_tokens = pool.tokens(&user);
                         let prev_share = pool.share(&user);
                         let prev_stake = pool.stake(&user);
                         let prev_token_supply = pool.token_supply;
@@ -1270,6 +1268,7 @@ mod tests {
                         assert_eq!(pool.total_stake - prev_total_stake, stake_deposited);
 
                         // calculated stake fraction is within 2 lamps of deposit amount
+                        // XXX note to jon: off-by-ones to determine are benign
                         assert!(
                             (pool.stake(&user) as i64 - prev_stake as i64 - stake_deposited as i64)
                                 .abs()
@@ -1279,7 +1278,7 @@ mod tests {
                         // tokens increased by exactly the mint amount
                         assert_eq!(pool.token_supply - prev_token_supply, tokens_minted);
 
-                        // tokens per supply increases with stake per total
+                        // tokens per supply increased with stake per total
                         if prev_total_stake > 0 {
                             assert_eq!(
                                 format!("{:.6}", pool.share(&user) - prev_share),
@@ -1313,8 +1312,33 @@ mod tests {
                             };
                             let stake_received = pool.withdraw(&user, tokens_burned).unwrap();
 
+                            // stake decreased by exactly the withdraw amount
+                            assert_eq!(prev_total_stake - pool.total_stake, stake_received);
+
+                            // calculated stake fraction is within 2 lamps of withdraw amount
+                            // XXX note to jon: off-by-ones to determine are benign
+                            assert!(
+                                (prev_stake as i64
+                                    - pool.stake(&user) as i64
+                                    - stake_received as i64)
+                                    .abs()
+                                    <= 2
+                            );
+
                             // tokens decreased by the burn amount
                             assert_eq!(prev_token_supply - pool.token_supply, tokens_burned);
+
+                            // tokens per supply decreased with stake per total
+                            if pool.total_stake > 0 {
+                                assert_eq!(
+                                    format!("{:.6}", prev_share - pool.share(&user)),
+                                    format!(
+                                        "{:.6}",
+                                        prev_stake as f64 / prev_total_stake as f64
+                                            - pool.stake(&user) as f64 / pool.total_stake as f64
+                                    )
+                                );
+                            }
                         };
                     }
 
@@ -1340,80 +1364,12 @@ mod tests {
                             let stake_diff = (curr_stake - prev_stake) as f64;
 
                             // stake increase is within 2 lamps when calculated as a difference or a percentage
+                            // XXX note to jon: off-by-ones to determine are benign
                             assert!((stake_share - stake_diff).abs() <= 2.0);
                         }
                     }
                 }
             }
-
-            //println!("pool: {:#?}", pool);
-
-            // XXX ok what operations can take place here
-            // * deposit some random amount of stake
-            //   - stake increases by that much
-            //   - tokens increase proportional to... some amount
-            //   - pool share increases... some amount
-            // * burn some random amount of (held) tokens
-            //   - tokens decrease by that much
-            //   - stake decreases proportional to something
-            //   - pool share decreases by something
-            // * rewards
-            //   - all shares and tokens remain static
-            //   - all stakes increase
-
-            // TODO ok next um... i guess i need to figure out rules for pool size change
-            // eg... 1000 pool, deposit 100, person owns slightly less than 10% of it
-            // because they dont own 100 of 1000, they own 100 of 1100
-            // then i write my dep/wit/rew fns, which...
-            // pick a random user if needed, do the action with a random amount
-            // then check (their? all?) user(s) to see if calculations were correct
-            // the weird thing here is hm. how much am i testing the target fns vs the model lol
-            // i need like. the calculations to be externalized... such that im actually checking them
-            // and not just using them to "check" themselves. think on this
-
-            // XXX ok so 100 is 10% of 1000
-            // but deposit 100 and it goes to 1100
-            // that means 100 / 1100 = 9.09%
-            // what should we be tracking externally? share? stake?
-            // mm. so rewards should be easy, right?
-            // we reward 100 stake. everyone's share stays the same
-            // but everyone's effective stake goes up by... the same percentage as the pool?
-            // cool. yea. reward cycle looks like
-            // * get all shares and stakes
-            // * do reward
-            // * get all again
-            // = shares all relatively equal
-            // = stakes increased by share times
         }
-    }
-
-    #[test]
-    fn example() {
-        let mut pool = PoolState::default();
-        let alice = Keypair::new().pubkey();
-        let bob = Keypair::new().pubkey();
-
-        pool.deposit(&alice, LAMPORTS_PER_SOL).unwrap();
-        pool.deposit(&bob, 3 * LAMPORTS_PER_SOL).unwrap();
-
-        let alice_pct_before = pool.share(&alice);
-        let bob_pct_before = pool.share(&bob);
-        let alice_stk_before = pool.stake(&alice);
-        let bob_stk_before = pool.stake(&bob);
-        pool.reward((pool.total_stake as f64 * INFLATION_BASE_RATE) as u64);
-        let alice_pct_after = pool.share(&alice);
-        let bob_pct_after = pool.share(&bob);
-        let alice_stk_after = pool.stake(&alice);
-        let bob_stk_after = pool.stake(&bob);
-
-        println!("{} -> {}", alice_pct_before, alice_pct_after);
-        println!("{} -> {}", bob_pct_before, bob_pct_after);
-        println!("{} -> {}", alice_stk_before, alice_stk_after);
-        println!("{} -> {}", bob_stk_before, bob_stk_after);
-        println!(
-            "? {}, {}",
-            alice_stk_after - alice_stk_before,
-            alice_stk_before as f64 * INFLATION_BASE_RATE
-        );
     }
 }
