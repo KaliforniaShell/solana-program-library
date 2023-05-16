@@ -10,12 +10,14 @@ use {
         instruction::InstructionError,
         message::Message,
         signature::Signer,
+        signer::keypair::Keypair,
         stake::{
             instruction::StakeError,
             state::{Authorized, Lockup},
         },
         transaction::Transaction,
     },
+    spl_associated_token_account as atoken,
     spl_single_validator_pool::{
         error::SinglePoolError, find_default_deposit_account_address, id, instruction,
     },
@@ -260,6 +262,77 @@ async fn success_with_seed(activate: bool) {
     );
 }
 
+#[test_case(true; "activated")]
+#[test_case(false; "activating")]
+#[tokio::test]
+async fn fail_uninitialized(activate: bool) {
+    let mut context = program_test().start_with_context().await;
+    let accounts = SinglePoolAccounts::default();
+    let stake_account = Keypair::new();
+
+    let first_normal_slot = context.genesis_config().epoch_schedule.first_normal_slot;
+    context.warp_to_slot(first_normal_slot).unwrap();
+
+    create_vote(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &accounts.validator,
+        &accounts.vote_account,
+    )
+    .await;
+
+    let token_account =
+        atoken::get_associated_token_address(&context.payer.pubkey(), &accounts.mint);
+
+    create_independent_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &stake_account,
+        &Authorized {
+            staker: context.payer.pubkey(),
+            withdrawer: context.payer.pubkey(),
+        },
+        &Lockup::default(),
+        TEST_STAKE_AMOUNT,
+    )
+    .await;
+
+    delegate_stake_account(
+        &mut context.banks_client,
+        &context.payer,
+        &context.last_blockhash,
+        &stake_account.pubkey(),
+        &context.payer,
+        &accounts.vote_account.pubkey(),
+    )
+    .await;
+
+    if activate {
+        advance_epoch(&mut context).await;
+    }
+
+    let instructions = instruction::deposit(
+        &id(),
+        &accounts.vote_account.pubkey(),
+        &stake_account.pubkey(),
+        &token_account,
+        &context.payer.pubkey(),
+        &context.payer.pubkey(),
+    );
+    let message = Message::new(&instructions, Some(&context.payer.pubkey()));
+    let transaction = Transaction::new(&[&context.payer], message, context.last_blockhash);
+
+    // this gives a random borsh error upon attempting to deserialize the mint
+    // TODO perhaps in a separate pr, wrap this for all processors with a more helpful error
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap_err();
+}
+
 #[test_case(true, true; "activated_automorph")]
 #[test_case(false, true; "activating_automorph")]
 #[test_case(true, false; "activated_unauth")]
@@ -378,8 +451,3 @@ async fn fail_activation_mismatch(pool_first: bool) {
         .unwrap_err();
     check_error(e, SinglePoolError::WrongStakeState);
 }
-
-// XXX TODO ok next i want to...
-// * negative cases in withdraw
-// * test the token math stochastically
-// * fail if pool uninitialized

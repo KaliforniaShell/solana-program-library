@@ -129,6 +129,76 @@ async fn success(activate: bool, extra_lamports: u64, prior_deposit: bool) {
     );
 }
 
+#[tokio::test]
+async fn success_with_rewards() {
+    let alice_deposit = TEST_STAKE_AMOUNT;
+    let bob_deposit = TEST_STAKE_AMOUNT * 3;
+
+    let mut context = program_test().start_with_context().await;
+    let accounts = SinglePoolAccounts::default();
+    let minimum_delegation = accounts
+        .initialize_for_withdraw(&mut context, alice_deposit, Some(bob_deposit), true)
+        .await;
+
+    context.increment_vote_account_credits(&accounts.vote_account.pubkey(), 1);
+    advance_epoch(&mut context).await;
+
+    let alice_tokens = get_token_balance(&mut context.banks_client, &accounts.alice_token).await;
+    let bob_tokens = get_token_balance(&mut context.banks_client, &accounts.bob_token).await;
+
+    // tokens correspond to deposit after rewards
+    assert_eq!(alice_tokens, alice_deposit);
+    assert_eq!(bob_tokens, bob_deposit);
+
+    let (_, pool_stake, _) =
+        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+    let pool_stake = pool_stake.unwrap().delegation.stake;
+    let total_rewards = pool_stake - alice_deposit - bob_deposit - minimum_delegation;
+
+    let instructions = instruction::withdraw(
+        &id(),
+        &accounts.vote_account.pubkey(),
+        &accounts.alice_stake.pubkey(),
+        &accounts.alice.pubkey(),
+        &accounts.alice_token,
+        &accounts.alice.pubkey(),
+        alice_tokens,
+    );
+    let message = Message::new(&instructions, Some(&accounts.alice.pubkey()));
+    let transaction = Transaction::new(&[&accounts.alice], message, context.last_blockhash);
+
+    context
+        .banks_client
+        .process_transaction(transaction)
+        .await
+        .unwrap();
+
+    let alice_tokens = get_token_balance(&mut context.banks_client, &accounts.alice_token).await;
+    let bob_tokens = get_token_balance(&mut context.banks_client, &accounts.bob_token).await;
+
+    let (_, alice_stake, _) =
+        get_stake_account(&mut context.banks_client, &accounts.alice_stake.pubkey()).await;
+    let alice_rewards = alice_stake.unwrap().delegation.stake - alice_deposit;
+
+    let (_, bob_stake, _) =
+        get_stake_account(&mut context.banks_client, &accounts.stake_account).await;
+    let bob_rewards = bob_stake.unwrap().delegation.stake - minimum_delegation - bob_deposit;
+
+    // alice tokens are fully burned, bob remains unchanged
+    assert_eq!(alice_tokens, 0);
+    assert_eq!(bob_tokens, bob_deposit);
+
+    // reward amounts are proportional to deposits
+    assert_eq!(
+        (alice_rewards as f64 / total_rewards as f64 * 100.0).round(),
+        25.0
+    );
+    assert_eq!(
+        (bob_rewards as f64 / total_rewards as f64 * 100.0).round(),
+        75.0
+    );
+}
+
 #[test_case(true; "activated")]
 #[test_case(false; "activating")]
 #[tokio::test]
@@ -158,5 +228,3 @@ async fn fail_automorphic(activate: bool) {
         .unwrap_err();
     check_error(e, SinglePoolError::InvalidPoolAccountUsage);
 }
-
-// TODO withdraw after rewards
