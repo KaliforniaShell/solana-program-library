@@ -1030,32 +1030,8 @@ impl Processor {
     }
 }
 
-// XXX ok i want to test my deposit/withdrawal amount functions
-// maybe unit test them. that means... well, think about deposit only, for simplicity
-//
-// deposit takes three arguments:
-// * T: premoney token supply
-// * P: premoney pool stake
-// * U: user deposit stake
-// and it outputs A, an amount of tokens to mint
-//
-// now, the input values can fluctuate based on...
-// * deposit: T and P both increase, T:P ratio constant, A:P ratio constant
-// * withdraw: T and P both decrease, ratios same
-// * rewards: P increases, T:P ratio improves, A:P ratio... improves?
-//   hm like. i deposit 100. 10 rewards accrue. i withdraw 100 tokens and get 110 stake. ok sure
-//
-// so that means invariants we care about are...
-// * deposits and withdrawls do not affect A:P
-// * rewards improve A:P proportional to user stake fraction
-//
-// so i think my gameplan here is... we need a fake pool struct
-// it contains token supply, pool stake amount, and all user stakes
-// then it can have functions: deposit, withdraw, reward, which just modify those numbers...
-// and then use proptest or my own thing to make random permutations and check the invariants hold?
 #[cfg(test)]
 #[allow(clippy::integer_arithmetic)]
-#[allow(dead_code)] // XXX remove after
 mod tests {
     use {
         super::*,
@@ -1256,13 +1232,13 @@ mod tests {
                     // check their stake, tokens, and share increase by the expected amount
                     n if n <= 0.35 => {
                         let user = users.choose(&mut prng).unwrap();
-                        let prev_share = pool.share(&user);
-                        let prev_stake = pool.stake(&user);
+                        let prev_share = pool.share(user);
+                        let prev_stake = pool.stake(user);
                         let prev_token_supply = pool.token_supply;
                         let prev_total_stake = pool.total_stake;
 
                         let stake_deposited = deposit_amount(&mut prng);
-                        let tokens_minted = pool.deposit(&user, stake_deposited).unwrap();
+                        let tokens_minted = pool.deposit(user, stake_deposited).unwrap();
 
                         // stake increased by exactly the deposit amount
                         assert_eq!(pool.total_stake - prev_total_stake, stake_deposited);
@@ -1270,7 +1246,7 @@ mod tests {
                         // calculated stake fraction is within 2 lamps of deposit amount
                         // XXX note to jon: off-by-ones to determine are benign
                         assert!(
-                            (pool.stake(&user) as i64 - prev_stake as i64 - stake_deposited as i64)
+                            (pool.stake(user) as i64 - prev_stake as i64 - stake_deposited as i64)
                                 .abs()
                                 <= 2
                         );
@@ -1281,10 +1257,10 @@ mod tests {
                         // tokens per supply increased with stake per total
                         if prev_total_stake > 0 {
                             assert_eq!(
-                                format!("{:.6}", pool.share(&user) - prev_share),
+                                format!("{:.6}", pool.share(user) - prev_share),
                                 format!(
                                     "{:.6}",
-                                    pool.stake(&user) as f64 / pool.total_stake as f64
+                                    pool.stake(user) as f64 / pool.total_stake as f64
                                         - prev_stake as f64 / prev_total_stake as f64
                                 )
                             );
@@ -1296,12 +1272,12 @@ mod tests {
                     n if n > 0.35 && n <= 0.65 => {
                         if let Some(user) = users
                             .iter()
-                            .filter(|user| pool.tokens(&user) > 0)
+                            .filter(|user| pool.tokens(user) > 0)
                             .choose(&mut prng)
                         {
-                            let prev_tokens = pool.tokens(&user);
-                            let prev_share = pool.share(&user);
-                            let prev_stake = pool.stake(&user);
+                            let prev_tokens = pool.tokens(user);
+                            let prev_share = pool.share(user);
+                            let prev_stake = pool.stake(user);
                             let prev_token_supply = pool.token_supply;
                             let prev_total_stake = pool.total_stake;
 
@@ -1310,7 +1286,7 @@ mod tests {
                             } else {
                                 prng.gen_range(0..prev_tokens)
                             };
-                            let stake_received = pool.withdraw(&user, tokens_burned).unwrap();
+                            let stake_received = pool.withdraw(user, tokens_burned).unwrap();
 
                             // stake decreased by exactly the withdraw amount
                             assert_eq!(prev_total_stake - pool.total_stake, stake_received);
@@ -1319,7 +1295,7 @@ mod tests {
                             // XXX note to jon: off-by-ones to determine are benign
                             assert!(
                                 (prev_stake as i64
-                                    - pool.stake(&user) as i64
+                                    - pool.stake(user) as i64
                                     - stake_received as i64)
                                     .abs()
                                     <= 2
@@ -1331,11 +1307,11 @@ mod tests {
                             // tokens per supply decreased with stake per total
                             if pool.total_stake > 0 {
                                 assert_eq!(
-                                    format!("{:.6}", prev_share - pool.share(&user)),
+                                    format!("{:.6}", prev_share - pool.share(user)),
                                     format!(
                                         "{:.6}",
                                         prev_stake as f64 / prev_total_stake as f64
-                                            - pool.stake(&user) as f64 / pool.total_stake as f64
+                                            - pool.stake(user) as f64 / pool.total_stake as f64
                                     )
                                 );
                             }
@@ -1349,7 +1325,7 @@ mod tests {
 
                         let prev_shares_stakes = users
                             .iter()
-                            .map(|user| (user, pool.share(&user), pool.stake(&user)))
+                            .map(|user| (user, pool.share(user), pool.stake(user)))
                             .filter(|(_, _, stake)| stake > &0)
                             .collect::<Vec<_>>();
 
@@ -1357,9 +1333,9 @@ mod tests {
 
                         for (user, prev_share, prev_stake) in prev_shares_stakes {
                             // shares are the same before and after
-                            assert_eq!(pool.share(&user), prev_share);
+                            assert_eq!(pool.share(user), prev_share);
 
-                            let curr_stake = pool.stake(&user);
+                            let curr_stake = pool.stake(user);
                             let stake_share = prev_stake as f64 * INFLATION_BASE_RATE;
                             let stake_diff = (curr_stake - prev_stake) as f64;
 
