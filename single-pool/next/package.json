@@ -1,4 +1,5 @@
 {
+    "name": "single-pool-next",
     "scripts": {
         "build": "pnpm tsc",
         "lint": "eslint --max-warnings 0 .",
@@ -20,8 +21,7 @@
     "dependencies": {
         "@solana/buffer-layout": "^4.0.1",
         "@solana/spl-token": "^0.3.8",
-        "@solana/web3.js": "^1.78.4",
-        "single-pool-next": "file:../next"
+        "@solana/web3.js": "2.0.0-experimental.0556eb2"
     },
     "ava": {
         "extensions": {
