@@ -55,7 +55,7 @@
         "@solana/spl-type-length-value": "0.1.0"
     },
     "devDependencies": {
-        "@solana/web3.js": "^1.47.4",
+        "@solana/web3.js": "^1.93.4",
         "@types/chai": "^4.3.3",
         "@types/mocha": "^10.0.0",
         "@types/node": "^20.8.7",
