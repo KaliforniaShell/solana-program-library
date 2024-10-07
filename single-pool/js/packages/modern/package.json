@@ -27,7 +27,7 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
-    "@solana/web3.js": "=2.0.0-rc.1"
+    "@solana/web3.js": "=2.0.0-20241006045741"
   },
   "ava": {
     "extensions": {
