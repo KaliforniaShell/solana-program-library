@@ -388,9 +388,9 @@
   integrity sha512-+jby/Guq9H8O7NWgCv6X8VAiQE8Dr/nccsCtL74xyHKhu2Knu5EAKmOZj3nLCnLm1KooUzKY+5DsnGVqhM8/wQ==
 
 "@types/bn.js@^5.1.1":
-  version "5.1.5"
-  resolved "https://registry.yarnpkg.com/@types/bn.js/-/bn.js-5.1.5.tgz#2e0dacdcce2c0f16b905d20ff87aedbc6f7b4bf0"
-  integrity sha512-V46N0zwKRF5Q00AZ6hWtN0T8gGmDUaUzLWQvHFo5yThtVwK/VCenFY3wXVbOvNfajEpsTfQM4IN9k/d6gUVX3A==
+  version "5.1.6"
+  resolved "https://registry.yarnpkg.com/@types/bn.js/-/bn.js-5.1.6.tgz#9ba818eec0c85e4d3c679518428afdf611d03203"
+  integrity sha512-Xh8vSwUeMKeYYrj3cX4lGQgFSF/N03r+tv4AiLl1SucqV+uTQpxRcnM8AkXKHwYP9ZPXOYXRr2KPXpVlIvqh9w==
   dependencies:
     "@types/node" "*"
 
