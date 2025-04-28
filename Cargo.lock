@@ -3223,11 +3223,11 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.7.1"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683751d591e6d81200c39fb0d1032608b77724f34114db54f571ff1317b337c0"
+checksum = "4e613fc340b2220f734a8595782c551f1250e969d87d3be1ae0579e8d4065179"
 dependencies = [
- "num_enum_derive 0.7.1",
+ "num_enum_derive 0.7.3",
 ]
 
 [[package]]
@@ -3244,9 +3244,9 @@ dependencies = [
 
 [[package]]
 name = "num_enum_derive"
-version = "0.7.1"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c11e44798ad209ccdd91fc192f0526a369a01234f7373e1b141c96d7cee4f0e"
+checksum = "af1844ef2428cc3e1cb900be36181049ef3d3193c63e43026cfe202983b27a56"
 dependencies = [
  "proc-macro-crate 1.1.0",
  "proc-macro2",
@@ -6755,7 +6755,7 @@ dependencies = [
 name = "spl-feature-gate"
 version = "0.1.0"
 dependencies = [
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "solana-program",
  "solana-program-test",
  "solana-sdk",
@@ -6908,7 +6908,7 @@ dependencies = [
 name = "spl-instruction-padding"
 version = "0.1.0"
 dependencies = [
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "solana-program",
  "solana-program-test",
  "solana-sdk",
@@ -7092,7 +7092,7 @@ dependencies = [
  "borsh 1.5.3",
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "rand 0.8.5",
  "solana-program",
  "solana-program-test",
@@ -7148,7 +7148,7 @@ dependencies = [
  "bytemuck",
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "proptest",
  "serde",
  "serde_derive",
@@ -7229,7 +7229,7 @@ dependencies = [
  "lazy_static",
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "proptest",
  "serial_test",
  "solana-program",
@@ -7263,7 +7263,7 @@ dependencies = [
  "lazy_static",
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "proptest",
  "serde",
  "serde_json",
@@ -7292,7 +7292,7 @@ dependencies = [
  "bytemuck",
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "solana-program",
  "solana-zk-token-sdk",
  "spl-memo 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -7546,7 +7546,7 @@ version = "0.1.1"
 dependencies = [
  "num-derive 0.4.2",
  "num-traits",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "solana-program",
  "solana-program-test",
  "solana-sdk",
@@ -7584,7 +7584,7 @@ name = "spl-token-wrap"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "num_enum 0.7.1",
+ "num_enum 0.7.3",
  "solana-program",
  "spl-associated-token-account 2.2.0",
  "spl-token 4.0.0",
